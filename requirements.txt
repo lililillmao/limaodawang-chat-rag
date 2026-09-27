@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+chromadb
+pypdf
+python-docx
+requests
+watchdog

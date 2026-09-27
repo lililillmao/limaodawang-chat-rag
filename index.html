@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>狸猫AI工具盒  v1.21 </title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" id="hljs-dark">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" id="hljs-light" disabled>
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/chat.css">
+<link rel="stylesheet" href="css/input.css">
+<link rel="stylesheet" href="css/modal.css">
+</head>
+<body>
+
+<aside id="sidebar">
+  <div class="side-head">
+    <button class="btn-new" id="newChat">＋ 新建对话</button>
+    <input type="text" id="searchBox" class="search-box" placeholder="🔍 搜索标题或内容…">
+    <label class="star-filter"><input type="checkbox" id="starFilter"> ⭐ 只看有收藏的对话</label>
+  </div>
+  <div class="side-list" id="sessionList"></div>
+  <div class="side-foot">
+    <button id="openSettings">⚙ 设置</button>
+    <button id="exportBtn">↧ 当前JSON</button>
+    <button id="exportMdBtn">↧ 当前MD</button>
+    <button id="exportTxtBtn">↧ 当前TXT</button>
+    <button id="backupAllBtn">↧ 备份全部</button>
+    <button id="restoreAllBtn">↥ 恢复全部</button>
+  </div>
+</aside>
+
+<div id="main">
+  <div class="topbar">
+    <button class="icon-btn" id="toggleSide" title="显示/隐藏侧栏">☰</button>
+    <select id="modelSelect"><option>加载中...</option></select>
+    
+    <select id="skillSelect" title="选择当前要加载的Skill"><option value="">（未加载Skill）</option></select>
+    
+    <button class="compare-toggle" id="compareBtn" title="开启后同时问两个模型">⚖️ 对比</button>
+    
+    <select id="modelSelect2"><option>模型 B</option></select>
+    
+    <button class="rag-toggle" id="ragBtn" title="开启后从本地知识库检索相关上下文">📚 知识库 <span class="badge" id="ragBadge">关</span></button>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="paramBtn" title="会话级模型参数">🌡️ 参数</button>
+    <button class="icon-btn" id="compressBtn" title="把早期对话压缩成摘要，节省上下文">🗜️</button>
+    <span id="ctxInfo"></span>
+    <span id="status" style="font-size:12px;color:var(--text-dim)"><span class="status-dot"></span>就绪</span>
+    <button class="icon-btn" id="themeToggle" title="切换主题">🌙</button>
+  </div>
+  <div id="breadcrumbBar" class="breadcrumb-bar" style="display:none"></div>
+  <div id="messages"></div>
+  <div id="msgNav"></div>
+  <div class="nav-tip" id="navTip"></div>
+  <button id="jumpBtn" title="回到底部">↓</button>
+  <div class="input-area">
+    <div class="input-inner">
+      <div class="quote-preview" id="quotePreview"></div>
+      <div class="quick-prompts" id="quickPrompts"></div>
+      <textarea id="input" rows="1" placeholder="发消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <div class="input-foot">
+        <span class="hint">Enter 发送 · Ctrl+N 新对话 · Ctrl+K 清空输入 · Esc 停止</span>
+        <span class="spacer"></span>
+        <button id="micBtn" title="点击开始/停止语音输入">🎤</button>
+        <button id="sendBtn">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="settingsMask">
+  <div class="modal">
+    <h2>设置</h2>
+    <div class="field"><label>Ollama 地址</label><input type="text" id="cfgUrl"></div>
+    <div class="field"><label>RAG 后端地址（Python 秘书）</label><input type="text" id="cfgRagUrl"></div>
+    
+    <div class="field">
+      <label>知识库管理</label>
+      <div class="row" style="align-items:center; gap:10px; margin-top:6px;">
+        <button id="rebuildRagBtn" style="padding:8px 16px; border-radius:8px; border:none; background:var(--accent); color:#fff; cursor:pointer;">🔄 重建知识库</button>
+        <span id="ragBuildStatus" style="font-size:12px; color:var(--text-dim);">就绪</span>
+      </div>
+      <div id="ragProgressBarWrap" style="display:none; width:100%; background:var(--border); height:6px; border-radius:3px; margin-top:8px; overflow:hidden;">
+        <div id="ragProgressBar" style="background:var(--accent); height:100%; width:0%; transition:width 0.3s;"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Skill 目录</label>
+      <div class="row">
+        <input type="text" id="cfgSkillDir" placeholder="例如: E:/skills">
+        <button id="saveSkillDirBtn" style="padding:8px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;white-space:nowrap">保存并刷新</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex; align-items:flex-start; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="cfgCompareConcurrent" style="margin-top:4px;">
+        <span>对比模式并发生成</span>
+      </label>
+      <div style="font-size:12px; color:var(--text-dim); margin-top:4px; line-height:1.6; padding-left:22px;">
+        • <b>关闭（串行）</b>：先答模型A，再答模型B。速度稍慢，但对电脑性能负担小。<br>
+        • <b>开启（并行）</b>：两个模型同时回答。速度翻倍，但对显存和算力要求极高，低配电脑可能会卡死。
+      </div>
+    </div>
+
+    <div class="field">
+      <label>存储目录</label>
+      <div class="row">
+        <input type="text" id="cfgDir" placeholder="尚未选择" readonly>
+        <button id="pickFolderBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;white-space:nowrap">选择文件夹</button>
+      </div>
+    </div>
+    <div class="field"><label>系统提示词（无Skill时生效）</label><textarea id="cfgSys"></textarea></div>
+    <div class="field"><label>Temperature：<span id="tempVal">0.7</span></label><input type="range" id="cfgTemp" min="0" max="2" step="0.1"></div>
+    <div class="field"><label>Top P：<span id="toppVal">0.9</span></label><input type="range" id="cfgTopP" min="0" max="1" step="0.05"></div>
+    <div class="field"><label>上下文轮数</label><input type="number" id="cfgCtx" min="1" max="100"></div>
+    <div class="field">
+      <label>模型上下文窗口 num_ctx</label>
+      <select id="cfgNumCtx">
+        <option value="2048">2048</option>
+        <option value="4096">4096</option>
+        <option value="8192">8192（推荐）</option>
+        <option value="16384">16384</option>
+        <option value="32768">32768</option>
+      </select>
+    </div>
+    <div class="field"><label>单次回复最大 token（num_predict）</label><input type="number" id="cfgNumPredict" min="64" max="4096" step="64" value="1024"></div>
+    <div class="field"><label>聊天字体大小：<span id="fontSizeVal">15</span> px</label><input type="range" id="cfgFontSize" min="12" max="22" step="1"></div>
+    <div class="field">
+      <label>主题色</label>
+      <div class="color-picker-row" id="accentPicker">
+        <button class="color-swatch" data-color="#4d6bfe" style="background:#4d6bfe"></button>
+        <button class="color-swatch" data-color="#10a37f" style="background:#10a37f"></button>
+        <button class="color-swatch" data-color="#7c5cff" style="background:#7c5cff"></button>
+        <button class="color-swatch" data-color="#e76f51" style="background:#e76f51"></button>
+        <button class="color-swatch" data-color="#f4a261" style="background:#f4a261"></button>
+        <button class="color-swatch" data-color="#e91e63" style="background:#e91e63"></button>
+        <input type="color" id="cfgAccent" style="width:44px;height:30px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;padding:2px">
+      </div>
+    </div>
+
+    <h2 style="font-size:15px;margin-top:22px">提示词模板</h2>
+    <div class="tpl-list" id="tplList"></div>
+    <div class="row" style="margin-bottom:8px">
+      <button id="addTplBtn" style="flex:1;padding:8px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit">＋ 新增模板</button>
+      <button id="resetTplBtn" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-family:inherit">恢复默认</button>
+    </div>
+
+    <h2 style="font-size:15px;margin-top:22px">角色预设（Skill加载优先）</h2>
+    <div class="preset-list" id="presetList"></div>
+    <div class="row">
+      <button id="addPresetBtn" style="flex:1;padding:8px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit">＋ 新建预设</button>
+      <button id="importPresetFolderBtn" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-family:inherit">↥ 从文件夹导入</button>
+    </div>
+    <div class="modal-actions">
+      <button id="closeSettingsBtn">关闭</button>
+      <button class="primary" id="saveSettingsBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="presetMask">
+  <div class="modal">
+    <h2 id="presetTitle">编辑预设</h2>
+    <div class="field"><label>名称</label><input type="text" id="presetName"></div>
+    <div class="field"><label>系统提示词</label><textarea id="presetPrompt" style="min-height:200px"></textarea></div>
+    <div class="field">
+      <label style="margin-bottom:8px">参数覆盖（不勾选则继承全局）</label>
+      <div id="presetParamBody"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="closePresetEditBtn">取消</button>
+      <button class="primary" id="savePresetEditBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="regenModelMask">
+  <div class="modal" style="width:420px">
+    <h2>选择重新生成的模型</h2>
+    <div class="field">
+      <label>当前模型：<span id="regenCurrentModel" style="color:var(--accent);font-weight:500"></span></label>
+      <select id="regenModelSelect" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text);margin-top:8px;font-size:14px;font-family:inherit"></select>
+    </div>
+    <div class="modal-actions">
+      <button id="closeRegenModelModalBtn">取消</button>
+      <button class="primary" id="regenConfirmBtn">确认重新生成</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="sessionParamMask">
+  <div class="modal" style="width:520px">
+    <h2>会话级参数</h2>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+      勾选的参数只对当前对话生效，不影响全局设置。<br>
+      优先级：<b>会话</b> &gt; <b>预设</b> &gt; <b>全局</b>
+    </div>
+    <div id="sessionParamBody"></div>
+    <div class="modal-actions">
+      <button id="closeSessionParamBtn">取消</button>
+      <button class="primary" id="saveSessionParamBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="skillComboMask">
+  <div class="modal" style="width:520px">
+    <h2>🧩 多 Skill 组合</h2>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+      勾选多个 Skill，system prompt 会按勾选顺序拼接。<br>
+      <b>多 Skill 模式下 RAG 检索自动使用全库</b>，避免跨 Skill 分库检索的复杂度。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button id="skillComboSelectAll" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:12px;font-family:inherit">全选</button>
+      <button id="skillComboClearAll" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:12px;font-family:inherit">清空</button>
+    </div>
+    <div id="skillComboList" class="skill-combo-list"></div>
+    <div id="skillComboStats" class="combo-stats"></div>
+    <div class="modal-actions">
+      <button id="skillComboCancel">取消</button>
+      <button class="primary" id="skillComboConfirm">应用</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="restoreFile" accept=".json,application/json" style="display:none">
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="js/state.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/config.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/session.js"></script>
+<script src="js/markdown.js"></script>
+<script src="js/api.js"></script>
+<script src="js/ui/sidebar.js"></script>
+<script src="js/ui/input.js"></script>
+<script src="js/ui/settings.js"></script>
+<script src="js/ui/messages.js"></script>
+<script src="js/features/compress.js"></script>
+<script src="js/features/export.js"></script>
+<script src="js/features/chat.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

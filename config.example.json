@@ -1,0 +1,11 @@
+{
+  "skill_dir": "./skills",
+  "ollama_url": "http://127.0.0.1:11434",
+  "embed_model": "nomic-embed-text",
+  "chunk_size": 600,
+  "chunk_overlap": 100,
+  "host": "127.0.0.1",
+  "port": 8000,
+  "safety_keywords": [],
+  "safety_fallback_path": ""
+}
