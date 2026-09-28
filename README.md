@@ -1,7 +1,7 @@
-#  狸猫AI工具盒 (Limaodawang AI Toolbox)
+# 狸猫AI工具盒 (Limaodawang AI Toolbox)
 
 > 一个基于 Ollama 的本地大模型聊天客户端，支持 **动态 Skill 加载** 与 **RAG 知识库检索**。
-> 前后端分离：前端单文件 HTML，后端 Python (FastAPI + ChromaDB)。
+> 前后端分离：模块化前端（原生 ES 风格多文件）+ 后端 Python (FastAPI + ChromaDB)。
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
@@ -11,7 +11,23 @@
 
 ## ✨ 特性
 
-                                                       1.18版本首发功能预览
+### 1.20 版本核心更新
+
+- 🧱 **前端模块化重构** —— 3000 行单文件 `index.html` 拆分为 `js/` 目录下 15 个模块 + `css/` 目录下 5 个样式表，`index.html` 只剩 190 行骨架
+- 🧩 **Skill 加载记录与追溯** —— 每条 AI 回答记录生成时使用的 Skill（`skillId` / `skillName`），消息头显示徽章，导出 MD / TXT / JSON 时一并带上
+- 🚀 **一键启动器** —— 新增 `启动狸猫AI.bat`，自动检测 Python 与 Ollama，同时拉起 RAG 后端与前端服务器并打开浏览器
+- 🐛 **浏览器记忆状态修复** —— 修复刷新页面后下拉框显示 Skill 但实际未加载的问题
+
+### 1.19 版本功能
+
+- ⚡ **知识库一键重建** —— 告别命令行，在设置面板点击即可后台重建，带实时进度条
+- 🚀 **增量更新** —— 智能识别修改过的文件，只处理变动部分，速度提升 10 倍
+- 📚 **RAG 溯源 UI** —— 回答下方可展开查看引用的本地文档名称与片段
+- ⚙️ **动态 Skill 目录** —— 无需重启服务，在设置面板修改路径即热重载
+- ⚖️ **并发/串行对比开关** —— 根据电脑性能，自由选择双模型对比模式
+
+### 1.18 版本首发功能
+
 - 🧩 **动态 Skill 加载** —— 把任意 `SKILL.md` 放进 `skills/` 目录，前端下拉框选中即可作为系统提示词注入，无需改代码
 - 📚 **RAG 知识库检索** —— 自动扫描、切片、向量化本地文档（支持 `.md/.txt/.pdf/.docx/.py/.json/...`），提问时按需检索相关片段注入上下文
 - 🎭 **Skill 专属颜文字** —— 每个 Skill 可以在同级目录放 `emoji_config.json`，加载时自动生效；没加载 Skill 时 `[emo:xxx]` 原样显示
@@ -25,12 +41,6 @@
 - 💾 **多格式导出** —— JSON / Markdown / TXT / 单条回答 / 全量备份恢复
 - 🖥️ **纯本地运行** —— 无云端、无遥测、无账号
 
-                                                             1.19新功能！
-- ⚡ **知识库一键重建** —— 告别命令行，在设置面板点击即可后台重建，带实时进度条
-- 🚀 **增量更新** —— 智能识别修改过的文件，只处理变动部分，速度提升 10 倍
-- 📚 **RAG 溯源 UI** —— 回答下方可展开查看引用的本地文档名称与片段
-- ⚙️ **动态 Skill 目录** —— 无需重启服务，在设置面板修改路径即热重载
-- ⚖️ **并发/串行对比开关** —— 根据电脑性能，自由选择双模型对比模式
 ---
 
 ## 🏗️ 架构
@@ -43,23 +53,35 @@
 │  - RAG 开关              │         │   /api/embeddings 向量     │
 └───────────┬─────────────┘         └──────────────────────────┘
             │
+            │ 加载 js/*.js 模块 + css/*.css
+            ▼
+┌─────────────────────────┐         ┌──────────────────────────┐
+│  js/ 模块化前端         │         │  ChromaDB (本地持久化)    │
+│  - state/utils/config   │         └──────────────────────────┘
+│  - storage/session      │
+│  - markdown/api         │
+│  - ui/ + features/      │
+│  - main.js (入口)       │
+└───────────┬─────────────┘
             │ HTTP
             ▼
 ┌─────────────────────────┐         ┌──────────────────────────┐
-│  rag_server.py (8000)   │◄───────►│   ChromaDB (本地持久化)   │
+│  rag_server.py (8000)   │◄───────►│   skills/  (SKILL.md)   │
 │  - /api/skills          │         └──────────────────────────┘
 │  - /api/skill_content   │
-│  - /api/search  (RAG)   │         ┌──────────────────────────┐
-│  - /api/build   (建库)   │◄───────►│   skills/  (SKILL.md)   │
-└─────────────────────────┘         └──────────────────────────┘
+│  - /api/search  (RAG)   │
+│  - /api/build   (建库)   │
+└─────────────────────────┘
 ```
 
 **工作流程**：
 
-1. 前端启动 → 请求 `/api/skills` 拉取所有 Skill 列表 → 填充下拉框
-2. 用户选择 Skill → 请求 `/api/skill_content` 获取完整 `SKILL.md` 和对应的 `emoji_config.json` → 分别存为 `window.currentSkillPrompt` 和 `window.currentSkillEmo`
-3. 用户发消息（开启 RAG）→ 请求 `/api/search` 检索相关片段 → 拼接进 system prompt → 发给 Ollama
-4. Ollama 流式返回 → 前端渲染（Markdown / 代码高亮 / KaTeX 公式 / 颜文字替换）
+1. 浏览器加载 `index.html`，按顺序引入 `js/` 下 15 个模块
+2. `main.js` 的 `init()` 启动 → 请求 `/api/skills` 拉取 Skill 列表 → 填充下拉框
+3. 用户选择 Skill → 请求 `/api/skill_content` 获取 `SKILL.md` 和 `emoji_config.json` → 存为全局状态
+4. 用户发消息（开启 RAG）→ 请求 `/api/search` 检索相关片段 → 拼接进 system prompt → 发给 Ollama
+5. Ollama 流式返回 → 前端渲染（Markdown / 代码高亮 / KaTeX 公式 / 颜文字替换）
+6. AI 回答落库时记录 `skillId` / `skillName`，消息头展示徽章
 
 ---
 
@@ -130,9 +152,15 @@ cp config.example.json config.json
 
 ### 5. 启动
 
-**方式 A：一键启动（Windows）**
+**方式 A：一键启动（Windows，推荐）**
 
-双击 `启动RAG秘书.bat`。
+双击 `启动狸猫AI.bat`。脚本会自动：
+
+1. 检测 Python（未装则提示）
+2. 检测 Ollama（未连上只警告）
+3. 打开黑框跑 `rag_server.py`（端口 8000）
+4. 打开黑框跑前端静态服务器（端口 5500）
+5. 自动打开浏览器
 
 **方式 B：手动启动**
 
@@ -142,9 +170,14 @@ ollama serve
 
 # 终端 2：启动 RAG 秘书
 python rag_server.py
+
+# 终端 3：启动前端静态服务器
+python -m http.server 5500
 ```
 
-看到如下输出即成功：
+然后浏览器访问 `http://127.0.0.1:5500/index.html`。
+
+看到如下后端输出即成功：
 
 ```
 🚀 RAG 秘书启动中...
@@ -154,23 +187,44 @@ python rag_server.py
 INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
-### 6. 打开前端
+> ⚠️ **1.20 起前端已模块化拆分**，必须通过 HTTP 访问（不能双击 `file://` 打开 `index.html`）。
 
-用浏览器打开 `index.html` 即可（无需 npm、无需构建）。
+### 6. 建立知识库（首次使用必须做）
 
-> 如果双击打开后 `fetch` 被浏览器 CORS 策略拦截，可以用一个静态服务器：
-> ```bash
-> python -m http.server 5500
-> # 然后访问 http://127.0.0.1:5500/index.html
-> ```
+把要检索的文档放进 `skill_dir` 目录，**在前端界面点击左下角「⚙ 设置」->「知识库管理」->「🔄 重建知识库」**即可。
 
-### 7. 建立知识库（首次使用必须做）
-
-把你要检索的文档放进 `skill_dir` 目录，**在前端界面点击左下角「⚙ 设置」->「知识库管理」->「🔄 重建知识库」** 即可。
-
-前端会显示实时进度条和当前处理的文件，完成后会自动提示。
+前端会显示实时进度条和当前处理的文件，完成后自动提示。
 
 > ⚠️ **每次修改 `skill_dir` 下的任何文档后，点击一次「重建知识库」即可。得益于增量更新，未修改的文件会被极速跳过。**
+
+---
+
+## 📂 前端目录结构
+
+1.20 起，前端从单文件拆分为模块化布局：
+
+```
+js/
+├── state.js              # 全局状态变量（会话、UI 状态、Skill 状态等）
+├── utils.js              # 通用工具（escapeHtml / estimateTokens / copyText 等）
+├── config.js             # 默认配置、本地持久化、主题应用
+├── storage.js            # 草稿 + IndexedDB + 文件夹同步
+├── session.js            # 会话增删改查、搜索、重命名
+├── markdown.js           # Markdown 渲染、思考分离、颜文字替换
+├── api.js                # Ollama 请求 + RAG 检索
+├── main.js               # 应用入口 init()
+├── ui/
+│   ├── sidebar.js        # 侧栏会话列表
+│   ├── input.js          # 输入框、快捷模板、语音、快捷键
+│   ├── settings.js       # 设置面板、预设、模板、颜文字列表
+│   └── messages.js       # 消息渲染、消息导航、引用、朗读
+└── features/
+    ├── chat.js           # 对话核心（发送 / 重发 / 续写 / 重新生成 / 分支）
+    ├── compress.js       # 上下文压缩
+    └── export.js         # 导出 MD/TXT/JSON、备份恢复
+```
+
+加载顺序在 `index.html` 底部，共 15 个 `<script src="js/...">`，无打包、无构建。
 
 ---
 
@@ -295,15 +349,26 @@ version: 1.00
 
 ```
 .
-├── index.html                 # 前端（单文件，无构建）
+├── index.html                 # 前端骨架（190 行）+ 15 个 <script src>
+├── css/                       # 5 个样式表
+│   ├── base.css               # 变量、reset、主题
+│   ├── layout.css             # 侧栏、顶栏、主布局
+│   ├── chat.css               # 消息、思考框、代码块、对比
+│   ├── input.css              # 输入区、快捷模板、语音
+│   └── modal.css              # 弹窗、设置面板
+├── js/                        # 15 个前端模块（见「前端目录结构」）
 ├── rag_server.py              # 后端 RAG 服务
-├── 启动RAG秘书.bat             # Windows 一键启动
+├── 启动狸猫AI.bat              # 一键启动（1.20 新增）
+├── 启动RAG秘书.bat             # 只启动后端
 ├── requirements.txt
 ├── config.example.json        # 配置模板
 ├── config.json                # 本地配置（已 .gitignore）
 ├── LICENSE
 ├── README.md
-├── file_hashes.json # 增量更新缓存（已 .gitignore）
+├── docs/                      # 项目文档
+│   ├── 功能预览-1.20-1.21.txt
+│   └── 交流群.txt
+├── file_hashes.json           # 增量更新缓存（已 .gitignore）
 └── chroma_db/                 # 向量库（自动生成，已 .gitignore）
 ```
 
@@ -341,13 +406,21 @@ version: 1.00
 - 检查 Skill 目录里是否有 `emoji_config.json`，且和 `SKILL.md` 同级
 - 确认前端已经选择了那个 Skill（状态栏应显示"已加载 Skill: ... (颜文字 N)"）
 - 没加载 Skill 时 `[emo:xxx]` 原样显示是**预期行为**
+- **1.20 修复**：刷新页面后下拉框会保留上次选择，但 `onchange` 不会自动触发。现在已通过 `dispatchEvent` 修复，若仍遇到，手动切换一次即可
 </details>
 
 <details>
-<summary><b>浏览器报 CORS 错误</b></summary>
+<summary><b>刷新后第一条消息没有 Skill 效果</b></summary>
 
-- 用 `python -m http.server 5500` 起一个静态服务器，用 `http://127.0.0.1:5500` 访问
-- 别用 `file://` 协议直接打开
+见上一条。1.20 已修复。
+</details>
+
+<details>
+<summary><b>浏览器报 CORS 错误 / 打开 `index.html` 白屏</b></summary>
+
+- **1.20 起前端已模块化拆分，必须走 HTTP**，不能用 `file://` 双击打开
+- 用 `python -m http.server 5500` 起静态服务器，访问 `http://127.0.0.1:5500/index.html`
+- 或直接双击 `启动狸猫AI.bat`，它会自动帮你起服务器
 </details>
 
 <details>
@@ -362,7 +435,7 @@ version: 1.00
 <details>
 <summary><b>如何彻底清空向量库？</b></summary>
 
-删除chroma_db/文件夹和file_hashes.json文件，重新点击「重建知识库」即可。
+删除 `chroma_db/` 文件夹和 `file_hashes.json` 文件，重新点击「重建知识库」即可。
 </details>
 
 ---
@@ -377,9 +450,28 @@ version: 1.00
 
 ## 🗺️ Roadmap
 
-- [x] 构建知识库时返回流式进度（已在 1.19 版本实现）
-- [ ] RAG 检索按 Skill 命名空间过滤
-- [ ] 支持更多文档格式（`.epub` / `.xlsx`）
+### 已完成
+- [x] 构建知识库时返回流式进度（1.19）
+- [x] 前端模块化拆分（1.20）
+- [x] Skill 加载记录（消息级字段 + UI 徽章 + 导出带上）（1.20）
+- [x] 一键启动器 `启动狸猫AI.bat`（1.20）
+
+### 1.20 剩余计划
+- [ ] **F2** 多平台 API 接入（DeepSeek / OpenAI 兼容平台）
+- [ ] **F7** 平台连通性检测
+- [ ] **F8** 真实 token 用量显示
+- [ ] **F4** 会话级 / 预设级模型参数覆盖
+- [ ] **F5** 消息分支树状视图
+- [ ] **F6** 拖拽文件到输入框（临时 RAG）
+- [ ] **F1 v2** 切换会话自动恢复 Skill、重新生成时确认 Skill
+
+### 1.21 计划
+- [ ] 记忆系统（长期记忆）
+- [ ] RAG 按 Skill 命名空间过滤
+- [ ] 多 Skill 叠加
+- [ ] 工具调用 / MCP 支持
+- [ ] 视觉模型输入
+- [ ] 更多文档格式（`.epub` / `.xlsx`）
 - [ ] i18n（英文界面）
 
 ---

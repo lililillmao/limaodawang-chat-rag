@@ -1,0 +1,15 @@
+.input-area{padding:10px 20px 20px;flex-shrink:0}
+.input-inner{max-width:900px;margin:0 auto;border:1px solid var(--border);background:var(--bg-input);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.input-inner:focus-within{border-color:var(--accent)}
+.quick-prompts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:2px}
+.quick-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s}
+.quick-btn:hover{background:var(--hover);color:var(--text);border-color:var(--accent)}
+#input{width:100%;border:none;outline:none;resize:none;background:transparent;color:var(--text);font-family:inherit;font-size:var(--font-size);line-height:1.5;max-height:220px;min-height:24px}
+.input-foot{display:flex;align-items:center;gap:8px}
+.input-foot .hint{font-size:12px;color:var(--text-dim)}
+.input-foot button{padding:6px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-family:inherit}
+.input-foot button.stop{background:#e34b4b}
+#micBtn{padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:16px;font-family:inherit}
+#micBtn:hover{background:var(--hover)}
+#micBtn.recording{background:#e34b4b;color:#fff;border-color:#e34b4b;animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}

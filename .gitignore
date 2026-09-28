@@ -1,9 +1,8 @@
-__pycache__/
-*.pyc
-chroma_db/
 config.json
 file_hashes.json
-*.log
+chroma_db/
+conversations.json
+__pycache__/
+*.pyc
 .venv/
-.vscode/
-.idea/
+venv/
