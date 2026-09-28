@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 chroma_db/
 config.json
+file_hashes.json
 *.log
 .venv/
 .vscode/

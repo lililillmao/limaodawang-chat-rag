@@ -1,4 +1,4 @@
-# Ollama Chat with RAG & Skill Loader
+#  狸猫AI工具盒 (Limaodawang AI Toolbox)
 
 > 一个基于 Ollama 的本地大模型聊天客户端，支持 **动态 Skill 加载** 与 **RAG 知识库检索**。
 > 前后端分离：前端单文件 HTML，后端 Python (FastAPI + ChromaDB)。
@@ -11,6 +11,7 @@
 
 ## ✨ 特性
 
+                                                       1.18版本首发功能预览
 - 🧩 **动态 Skill 加载** —— 把任意 `SKILL.md` 放进 `skills/` 目录，前端下拉框选中即可作为系统提示词注入，无需改代码
 - 📚 **RAG 知识库检索** —— 自动扫描、切片、向量化本地文档（支持 `.md/.txt/.pdf/.docx/.py/.json/...`），提问时按需检索相关片段注入上下文
 - 🎭 **Skill 专属颜文字** —— 每个 Skill 可以在同级目录放 `emoji_config.json`，加载时自动生效；没加载 Skill 时 `[emo:xxx]` 原样显示
@@ -24,6 +25,12 @@
 - 💾 **多格式导出** —— JSON / Markdown / TXT / 单条回答 / 全量备份恢复
 - 🖥️ **纯本地运行** —— 无云端、无遥测、无账号
 
+                                                             1.19新功能！
+- ⚡ **知识库一键重建** —— 告别命令行，在设置面板点击即可后台重建，带实时进度条
+- 🚀 **增量更新** —— 智能识别修改过的文件，只处理变动部分，速度提升 10 倍
+- 📚 **RAG 溯源 UI** —— 回答下方可展开查看引用的本地文档名称与片段
+- ⚙️ **动态 Skill 目录** —— 无需重启服务，在设置面板修改路径即热重载
+- ⚖️ **并发/串行对比开关** —— 根据电脑性能，自由选择双模型对比模式
 ---
 
 ## 🏗️ 架构
@@ -159,17 +166,11 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 
 ### 7. 建立知识库（首次使用必须做）
 
-把你要检索的文档放进 `skill_dir` 目录，然后在浏览器 F12 控制台执行：
+把你要检索的文档放进 `skill_dir` 目录，**在前端界面点击左下角「⚙ 设置」->「知识库管理」->「🔄 重建知识库」** 即可。
 
-```js
-fetch('http://127.0.0.1:8000/api/build', { method: 'POST' })
-  .then(r => r.json())
-  .then(d => console.log(d));
-```
+前端会显示实时进度条和当前处理的文件，完成后会自动提示。
 
-看到 `{ status: "构建完成", files_read: N, chunks_saved: M }` 即成功。
-
-> ⚠️ **每次修改 `skill_dir` 下的任何文档后，都需要重新执行这一步。**
+> ⚠️ **每次修改 `skill_dir` 下的任何文档后，点击一次「重建知识库」即可。得益于增量更新，未修改的文件会被极速跳过。**
 
 ---
 
@@ -245,7 +246,10 @@ version: 1.00
 | `GET`  | `/` | 健康检查 |
 | `GET`  | `/api/skills` | 扫描并返回所有 Skill 列表 |
 | `GET`  | `/api/skill_content?skill_id=xxx` | 读取指定 Skill 的 `SKILL.md` 全文 + `emoji_config.json` |
-| `POST` | `/api/build` | 重建向量库（会清空旧数据） |
+| `GET`  | `/api/config` | 获取当前后端配置（如 skill_dir） |
+| `POST` | `/api/config` | 动态修改并保存配置（如热更新 skill_dir） |
+| `POST` | `/api/build` | 异步重建向量库（支持增量更新） |
+| `GET`  | `/api/build_status` | 获取当前知识库构建的进度和状态 |
 | `GET`  | `/api/search?query=xxx&top_k=3` | RAG 检索 |
 
 交互式文档：启动后访问 <http://127.0.0.1:8000/docs>。
@@ -260,6 +264,9 @@ version: 1.00
 |---|---|
 | Ollama 地址 | 默认 `http://127.0.0.1:11434` |
 | RAG 后端地址 | 默认 `http://127.0.0.1:8000` |
+| 知识库管理 | 一键重建向量库，带实时进度显示 |
+| Skill 目录 | 动态修改并热重载 Skill 路径 |
+| 并发对比开关 | 根据显卡性能选择双模型对比模式（串行/并行） |
 | 存储目录 | 绑定本地文件夹，会话自动同步到 `conversations.json` |
 | 系统提示词 | 未加载 Skill 时生效 |
 | Temperature / Top P | 采样参数 |
@@ -296,6 +303,7 @@ version: 1.00
 ├── config.json                # 本地配置（已 .gitignore）
 ├── LICENSE
 ├── README.md
+├── file_hashes.json # 增量更新缓存（已 .gitignore）
 └── chroma_db/                 # 向量库（自动生成，已 .gitignore）
 ```
 
@@ -317,7 +325,7 @@ version: 1.00
 1. 确认已经执行过 `/api/build`
 2. 检查 `config.json` 里的 `skill_dir` 是否正确
 3. 看后端黑窗口有没有 `⚠️ 读取 xxx 失败` 之类的报错
-4. 改过文档后忘了重建 —— 重新跑一次 `/api/build`
+4. 改过文档后忘了重建 —— 在前端点击「重建知识库」即可（会自动增量更新）
 </details>
 
 <details>
@@ -354,7 +362,7 @@ version: 1.00
 <details>
 <summary><b>如何彻底清空向量库？</b></summary>
 
-删除 `chroma_db/` 文件夹，重新执行 `/api/build`。
+删除chroma_db/文件夹和file_hashes.json文件，重新点击「重建知识库」即可。
 </details>
 
 ---
@@ -369,7 +377,7 @@ version: 1.00
 
 ## 🗺️ Roadmap
 
-- [ ] 构建知识库时返回流式进度
+- [x] 构建知识库时返回流式进度（已在 1.19 版本实现）
 - [ ] RAG 检索按 Skill 命名空间过滤
 - [ ] 支持更多文档格式（`.epub` / `.xlsx`）
 - [ ] i18n（英文界面）
@@ -378,7 +386,7 @@ version: 1.00
 
 ## 📜 License
 
-[MIT](./LICENSE) © 2025 <your-name>
+[MIT](./LICENSE) © 2025 limaodawang
 
 ---
 

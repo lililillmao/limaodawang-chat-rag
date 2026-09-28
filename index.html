@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>本地模型聊天</title>
+<title>狸猫AI工具盒</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" id="hljs-dark">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" id="hljs-light" disabled>
@@ -48,7 +48,7 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-s
 .icon-btn{width:36px;height:36px;padding:0!important;display:inline-flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
 #modelSelect{max-width:180px}
 #skillSelect{max-width:200px}
-#modelSelect2{max-width:180px;display:none} /* 默认隐藏，由JS控制 */
+#modelSelect2{max-width:180px;display:none}
 #modelSelect2.show{display:inline-block}
 .compare-toggle{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-family:inherit;white-space:nowrap}
 .compare-toggle.on{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -205,6 +205,18 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-s
 .rag-toggle:hover{background:var(--hover)}
 .rag-toggle.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .rag-toggle .badge{display:inline-block;min-width:16px;padding:0 4px;border-radius:8px;background:rgba(0,0,0,.2);font-size:11px;line-height:16px;text-align:center}
+.rag-source-box{margin-top:12px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg-side)}
+.rag-source-head{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:12px;color:var(--text-dim);user-select:none;transition:background .15s}
+.rag-source-head:hover{background:var(--hover)}
+.rag-source-head .rag-icon{font-size:14px}
+.rag-source-head .rag-arrow{width:0;height:0;border-left:5px solid currentColor;border-top:3px solid transparent;border-bottom:3px solid transparent;transition:transform .18s ease}
+.rag-source-box.open .rag-arrow{transform:rotate(90deg)}
+.rag-source-list{display:none;padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim);line-height:1.6}
+.rag-source-box.open .rag-source-list{display:block}
+.rag-source-item{margin-bottom:8px;padding-bottom:8px;border-bottom:1px dashed var(--border)}
+.rag-source-item:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.rag-source-name{font-weight:600;color:var(--accent);margin-bottom:4px;display:block}
+.rag-source-text{color:var(--text-dim);opacity:.9;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow-y:auto}
 </style>
 </head>
 <body>
@@ -231,12 +243,10 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-s
     <button class="icon-btn" id="toggleSide" title="显示/隐藏侧栏">☰</button>
     <select id="modelSelect"><option>加载中...</option></select>
     
-    <!-- 动态Skill加载下拉框 -->
     <select id="skillSelect" title="选择当前要加载的Skill"><option value="">（未加载Skill）</option></select>
     
     <button class="compare-toggle" id="compareBtn" title="开启后同时问两个模型">⚖️ 对比</button>
     
-    <!-- 对比模型下拉框：移除了内联的 style="display:none"，改为由JS控制 -->
     <select id="modelSelect2"><option>模型 B</option></select>
     
     <button class="rag-toggle" id="ragBtn" title="开启后从本地知识库检索相关上下文">📚 知识库 <span class="badge" id="ragBadge">关</span></button>
@@ -270,6 +280,40 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-s
     <h2>设置</h2>
     <div class="field"><label>Ollama 地址</label><input type="text" id="cfgUrl"></div>
     <div class="field"><label>RAG 后端地址（Python 秘书）</label><input type="text" id="cfgRagUrl"></div>
+    
+    <!-- 补全：一键重建知识库 -->
+    <div class="field">
+      <label>知识库管理</label>
+      <div class="row" style="align-items:center; gap:10px; margin-top:6px;">
+        <button id="rebuildRagBtn" style="padding:8px 16px; border-radius:8px; border:none; background:var(--accent); color:#fff; cursor:pointer;">🔄 重建知识库</button>
+        <span id="ragBuildStatus" style="font-size:12px; color:var(--text-dim);">就绪</span>
+      </div>
+      <div id="ragProgressBarWrap" style="display:none; width:100%; background:var(--border); height:6px; border-radius:3px; margin-top:8px; overflow:hidden;">
+        <div id="ragProgressBar" style="background:var(--accent); height:100%; width:0%; transition:width 0.3s;"></div>
+      </div>
+    </div>
+
+    <!-- 补全：Skill 目录动态修改 -->
+    <div class="field">
+      <label>Skill 目录</label>
+      <div class="row">
+        <input type="text" id="cfgSkillDir" placeholder="例如: E:/skills">
+        <button id="saveSkillDirBtn" style="padding:8px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;white-space:nowrap">保存并刷新</button>
+      </div>
+    </div>
+
+    <!-- 补全：并发模式开关 -->
+    <div class="field">
+      <label style="display:flex; align-items:flex-start; gap:6px; cursor:pointer;">
+        <input type="checkbox" id="cfgCompareConcurrent" style="margin-top:4px;">
+        <span>对比模式并发生成</span>
+      </label>
+      <div style="font-size:12px; color:var(--text-dim); margin-top:4px; line-height:1.6; padding-left:22px;">
+        • <b>关闭（串行）</b>：先答模型A，再答模型B。速度稍慢，但对电脑性能负担小。<br>
+        • <b>开启（并行）</b>：两个模型同时回答。速度翻倍，但对显存和算力要求极高，低配电脑可能会卡死。
+      </div>
+    </div>
+
     <div class="field">
       <label>存储目录</label>
       <div class="row">
@@ -382,7 +426,7 @@ function splitThinking(text){
 }
 function getThinkAndContent(m){if(m.thinking&&m.thinking.length>0)return{thinking:m.thinking,content:m.content};return splitThinking(m.content)}
 
-const DEFAULT_CFG={url:"http://127.0.0.1:11434",ragUrl:"http://127.0.0.1:8000",dir:"",system:"",temperature:0.7,top_p:0.9,contextRounds:20,theme:"dark",model:"",model2:"",num_ctx:8192,num_predict:1024,compareMode:false,fontSize:15,accent:"",quickPrompts:["翻译","总结","改代码"],emoMap:{},ragEnabled:false};
+const DEFAULT_CFG={url:"http://127.0.0.1:11434",ragUrl:"http://127.0.0.1:8000",dir:"",system:"",temperature:0.7,top_p:0.9,contextRounds:20,theme:"dark",model:"",model2:"",num_ctx:8192,num_predict:1024,compareMode:false,fontSize:15,accent:"",quickPrompts:["翻译","总结","改代码"],emoMap:{},ragEnabled:false, compareConcurrent:false};
 let cfg={...DEFAULT_CFG};
 let sessions=[],currentSessionId=null,presets=[],currentPresetId="";
 let folderHandle=null,generating=false,abortCtrl=null;
@@ -438,7 +482,6 @@ async function fetchModels(){
     sel.innerHTML=models.map(m=>`<option value="${m}" ${m===cfg.model?"selected":""}>${m}</option>`).join("");
     if(!cfg.model||!models.includes(cfg.model)){cfg.model=models[0];sel.value=cfg.model;saveLocal()}
     
-    // 填充模型B下拉框
     sel2.innerHTML='<option value="">（选模型B）</option>'+models.map(m=>`<option value="${m}" ${m===cfg.model2?"selected":""}>${m}</option>`).join("");
     if(!cfg.model2||!models.includes(cfg.model2)){cfg.model2=models.find(m=>m!==cfg.model)||models[0];sel2.value=cfg.model2;saveLocal()}
     setStatus("已连接")
@@ -539,12 +582,8 @@ function setCompareMode(on){
   const btn = document.getElementById("compareBtn");
   const sel2 = document.getElementById("modelSelect2");
   if(btn) btn.classList.toggle("on", cfg.compareMode);
-  
-  // 修复：直接控制display属性，避免被内联样式覆盖
   if(sel2) sel2.style.display = cfg.compareMode ? "inline-block" : "none";
-  
   saveLocal();
-  console.log("[本地客户端] setCompareMode:", cfg.compareMode, "| model =", cfg.model, "| model2 =", cfg.model2);
 }
 
 async function fetchRagContext(query) {
@@ -555,7 +594,12 @@ async function fetchRagContext(query) {
         const data = await res.json();
         if (data.results && data.results.length > 0) {
             const contextText = data.results.map(r => `[来源: ${r.source || '未知'}]\n${r.content}`).join("\n\n---\n\n");
-            return { context: contextText, safety_flag: data.safety_flag };
+            const sources = data.results.map(r => {
+                let name = r.source || '未知';
+                name = name.split(/[\\/]/).pop();
+                return { name: name, content: r.content };
+            });
+            return { context: contextText, sources: sources, safety_flag: data.safety_flag };
         }
     } catch (e) {
         console.error("⚠️ RAG 检索失败:", e);
@@ -644,10 +688,8 @@ function deleteMessage(idx) {
     if (!confirm("确定要删除这条消息吗？")) return;
     const s = getCurrentSession();
     if (!s || !s.messages[idx]) return;
-    // 从数组中移除这条消息
     s.messages.splice(idx, 1);
     s.updatedAt = Date.now();
-    // 保存并刷新界面
     saveLocal();
     saveToDisk();
     renderMessages();
@@ -659,7 +701,8 @@ async function sendMessage(){
   if(!text||generating)return;
   if(quoteState){const quoted=quoteState.text.split("\n").map(l=>"> "+l).join("\n");text=`${quoted}\n\n${text}`;clearQuote();}
   let ragContext = null;
-  if(cfg.ragEnabled){const ragRes = await fetchRagContext(text);if (ragRes) {ragContext = ragRes.context;}}
+  let ragSources = null;
+  if(cfg.ragEnabled){const ragRes = await fetchRagContext(text);if (ragRes) {ragContext = ragRes.context; ragSources = ragRes.sources;}}
   const s=getCurrentSession()||createSession();
   s.messages.push({role:"user",content:text,time:Date.now()});
   if(s.title==="新对话")s.title=text.slice(0,20);
@@ -673,19 +716,39 @@ async function sendMessage(){
   try{
     if(cfg.compareMode&&cfg.model2&&cfg.model2!==cfg.model){
       const gid="g"+Date.now();
-      const msgA={role:"assistant",content:"",thinking:"",model:cfg.model,groupId:gid,groupIdx:0,time:Date.now()};
-      s.messages.push(msgA);renderMessages();
-      await runStream(msgA,false,cfg.model,gid,null,ragContext);
-      const msgB={role:"assistant",content:"",thinking:"",model:cfg.model2,groupId:gid,groupIdx:1,time:Date.now()};
-      s.messages.push(msgB);renderMessages();
-      await runStream(msgB,false,cfg.model2,gid,gid,ragContext);
-      const lastTwo=s.messages.slice(-2);
-      if(lastTwo.length===2&&lastTwo[0].groupId===gid&&lastTwo[1].groupId===gid){
-        s.messages=s.messages.slice(0,-2);
-        s.messages.push({role:"assistant",groupId:gid,time:Date.now(),compare:[{model:cfg.model,content:msgA.content,thinking:msgA.thinking},{model:cfg.model2,content:msgB.content,thinking:msgB.thinking}]});
+      if (cfg.compareConcurrent) {
+        // ====== 并发模式 ======
+        const msgA={role:"assistant",content:"",thinking:"",model:cfg.model,groupId:gid,groupIdx:0,time:Date.now()};
+        const msgB={role:"assistant",content:"",thinking:"",model:cfg.model2,groupId:gid,groupIdx:1,time:Date.now()};
+        s.messages.push(msgA, msgB);
+        renderMessages();
+        await Promise.all([
+          runStream(msgA, false, cfg.model, gid, null, ragContext),
+          runStream(msgB, false, cfg.model2, gid, gid, ragContext)
+        ]);
+        const lastTwo=s.messages.slice(-2);
+        if(lastTwo.length===2&&lastTwo[0].groupId===gid&&lastTwo[1].groupId===gid){
+          s.messages=s.messages.slice(0,-2);
+          s.messages.push({role:"assistant",groupId:gid,time:Date.now(),compare:[{model:cfg.model,content:msgA.content,thinking:msgA.thinking},{model:cfg.model2,content:msgB.content,thinking:msgB.thinking}]});
+        }
+      } else {
+        // ====== 串行模式 ======
+        const msgA={role:"assistant",content:"",thinking:"",model:cfg.model,groupId:gid,groupIdx:0,time:Date.now()};
+        s.messages.push(msgA);renderMessages();
+        await runStream(msgA,false,cfg.model,gid,null,ragContext);
+        
+        const msgB={role:"assistant",content:"",thinking:"",model:cfg.model2,groupId:gid,groupIdx:1,time:Date.now()};
+        s.messages.push(msgB);renderMessages();
+        await runStream(msgB,false,cfg.model2,gid,gid,ragContext);
+        
+        const lastTwo=s.messages.slice(-2);
+        if(lastTwo.length===2&&lastTwo[0].groupId===gid&&lastTwo[1].groupId===gid){
+          s.messages=s.messages.slice(0,-2);
+          s.messages.push({role:"assistant",groupId:gid,time:Date.now(),compare:[{model:cfg.model,content:msgA.content,thinking:msgA.thinking},{model:cfg.model2,content:msgB.content,thinking:msgB.thinking}]});
+        }
       }
     }else{
-      const aiMsg={role:"assistant",content:"",thinking:"",model:cfg.model,time:Date.now()};
+      const aiMsg={role:"assistant",content:"",thinking:"",model:cfg.model,time:Date.now(),ragSources:ragSources};
       s.messages.push(aiMsg);renderMessages();
       await runStream(aiMsg,false,null,null,null,ragContext);
     }
@@ -976,13 +1039,21 @@ function buildMessageInner(m,isStreamingLast,idx){
     const cur=(m.currentVersion||0)+1;const total=m.versions.length;
     versionNav=`<span class="version-nav"><button class="ver-prev" title="上一个版本" ${m.currentVersion<=0?"disabled":""}>◀</button><span>${cur} / ${total}</span><button class="ver-next" title="下一个版本" ${m.currentVersion>=total-1?"disabled":""}>▶</button></span>`;
   }
+  
+  // ====== 这里是我们的溯源卡片逻辑 ======
+  let ragHtml = "";
+  if (m.ragSources && m.ragSources.length > 0) {
+    const items = m.ragSources.map(src => `<div class="rag-source-item"><span class="rag-source-name">📄 ${escapeHtml(src.name)}</span><div class="rag-source-text">${escapeHtml(src.content.slice(0, 150))}${src.content.length > 150 ? '...' : ''}</div></div>`).join("");
+    ragHtml = `<div class="rag-source-box"><div class="rag-source-head" onclick="this.parentElement.classList.toggle('open')"><span class="rag-arrow"></span><span class="rag-icon">📚</span><span>已引用 ${m.ragSources.length} 个知识库片段</span></div><div class="rag-source-list">${items}</div></div>`;
+  }
+
   const body=renderAiBody(m,isStreamingLast);
   let actions="";
   if(isStreamingLast&&!generating&&(m.content||m.thinking)){
     actions=`<div class="msg-actions"><button class="msg-action continue-btn" title="继续写">▶ 继续生成</button><button class="msg-action regen-btn" title="重新生成">🔄 重新生成</button><button class="msg-action branch-btn" title="从这一刻创建分支">🌿 分叉</button></div>`;
   }
   const floatBtns=`<div class="msg-float"><button class="msg-fbtn copy-btn" title="复制">📋</button><button class="msg-fbtn speak-btn" title="朗读这条回答">🔊</button>${quoteBtn}${starBtn}${delBtn}<button class="msg-fbtn export-one-btn" title="导出这条回答 (.md)">↧</button></div>`;
-  return `${floatBtns}<div class="msg"><div class="avatar ai">AI</div><div class="msg-body"><div class="msg-role">${escapeHtml(m.model||cfg.model||"AI")} ${msgTokens} ${versionNav} ${m.starred?'<span style="color:#f5b301">★</span>':''} ${timeHtml}</div>${body}${actions}</div></div>`;
+  return `${floatBtns}<div class="msg"><div class="avatar ai">AI</div><div class="msg-body"><div class="msg-role">${escapeHtml(m.model||cfg.model||"AI")} ${msgTokens} ${versionNav} ${m.starred?'<span style="color:#f5b301">★</span>':''} ${timeHtml}</div>${body}${ragHtml}${actions}</div></div>`;
 }
 
 function getMsgPreview(m){if(!m)return"";if(m.isSummary)return"【摘要】"+(m.content||"").slice(0,60);if(m.compare){const t=(m.compare[0]&&m.compare[0].content)||"";return"【对比】"+replaceEmo(t).slice(0,60);}if(m.role==="user")return"你："+replaceEmo(m.content||"").slice(0,60);return"AI："+replaceEmo(m.content||"").slice(0,60);}
@@ -1176,6 +1247,13 @@ async function resetEmo(){
 }
 
 function openSettings(){
+  fetch(`${getRagUrl()}/api/config`)
+    .then(res => res.json())
+    .then(data => {
+      const el = document.getElementById("cfgSkillDir");
+      if(el) el.value = data.skill_dir || "";
+    })
+    .catch(e => console.warn("获取后端配置失败", e));
   document.getElementById("cfgUrl").value=cfg.url;
   document.getElementById("cfgRagUrl").value=cfg.ragUrl||DEFAULT_CFG.ragUrl;
   document.getElementById("cfgDir").value=cfg.dir||"（未选择）";document.getElementById("cfgSys").value=cfg.system||"";
@@ -1184,6 +1262,7 @@ function openSettings(){
   document.getElementById("cfgCtx").value=cfg.contextRounds;document.getElementById("cfgNumCtx").value=cfg.num_ctx||8192;
   document.getElementById("cfgNumPredict").value=cfg.num_predict||1024;
   document.getElementById("cfgFontSize").value=cfg.fontSize||15;document.getElementById("fontSizeVal").textContent=cfg.fontSize||15;
+  document.getElementById("cfgCompareConcurrent").checked = cfg.compareConcurrent || false;
   const accent=cfg.accent||"#4d6bfe";document.getElementById("cfgAccent").value=accent;
   document.querySelectorAll("#accentPicker .color-swatch").forEach(s=>s.classList.toggle("active",s.dataset.color.toLowerCase()===accent.toLowerCase()));
   renderTplList();renderEmoList();renderPresets();document.getElementById("settingsMask").classList.add("show");
@@ -1196,6 +1275,7 @@ function saveSettings(){
   cfg.temperature=parseFloat(document.getElementById("cfgTemp").value);cfg.top_p=parseFloat(document.getElementById("cfgTopP").value);
   cfg.contextRounds=parseInt(document.getElementById("cfgCtx").value)||20;cfg.num_ctx=parseInt(document.getElementById("cfgNumCtx").value)||8192;
   cfg.num_predict=parseInt(document.getElementById("cfgNumPredict").value)||1024;
+  cfg.compareConcurrent = document.getElementById("cfgCompareConcurrent").checked;
   cfg.fontSize=parseInt(document.getElementById("cfgFontSize").value)||15;cfg.accent=document.getElementById("cfgAccent").value||"";
   saveLocal();applyFontSize();applyAccentColor();closeSettings();fetchModels();updateCtxInfo();
 }
@@ -1262,10 +1342,8 @@ async function init(){
   if(!cfg.ragUrl)cfg.ragUrl=DEFAULT_CFG.ragUrl;
   applyFontSize();applyTheme();
 
-  // 拉取文件夹
   try{const h=await idbGet("folderHandle");if(h){folderHandle=h;cfg.dir=h.name;const ok=await ensureFolderPermission().catch(()=>false);if(ok)await loadFromDisk()}}catch(e){}
 
-  // 拉取 Skill 列表
   try {
     const skillRes = await fetch(`${getRagUrl()}/api/skills`);
     const skillData = await skillRes.json();
@@ -1296,7 +1374,6 @@ async function init(){
   document.getElementById("modelSelect").onchange=e=>{cfg.model=e.target.value;saveLocal()};
   document.getElementById("modelSelect2").onchange=e=>{cfg.model2=e.target.value;saveLocal()};
   
-  // === 核心：Skill 加载逻辑 ===
   document.getElementById("skillSelect").onchange = async (e) => {
       const skillId = e.target.value;
       if (!skillId) {
@@ -1314,7 +1391,6 @@ async function init(){
               window.currentSkillEmo = data.emoji || {};
               const _emoCount = Object.keys(window.currentSkillEmo).length;
               setStatus(`已加载 Skill: ${data.name}${_emoCount ? ` (颜文字 ${_emoCount})` : ''}`);
-              console.log(`[客户端] 成功加载 Skill: ${data.name}，颜文字 ${_emoCount} 个`);
           } else {
               window.currentSkillPrompt = "";
               window.currentSkillEmo = {};
@@ -1333,6 +1409,89 @@ async function init(){
   document.getElementById("restoreAllBtn").onclick=()=>document.getElementById("restoreFile").click();
   document.getElementById("restoreFile").onchange=async(e)=>{const f=e.target.files[0];if(f)await restoreAll(f);e.target.value=""};
   document.getElementById("micBtn").onclick=toggleVoice;
+  
+  // 绑定保存 Skill 目录的按钮
+  document.getElementById("saveSkillDirBtn").onclick = async () => {
+    const dir = document.getElementById("cfgSkillDir").value.trim();
+    if (!dir) return alert("请输入目录路径");
+    try {
+      setStatus("正在更新 Skill 目录...");
+      const res = await fetch(`${getRagUrl()}/api/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill_dir: dir })
+      });
+      const data = await res.json();
+      if (data.status === "success") {
+        alert("目录已更新！正在重新加载 Skill 列表...");
+        const skillRes = await fetch(`${getRagUrl()}/api/skills`);
+        const skillData = await skillRes.json();
+        const skillSel = document.getElementById("skillSelect");
+        if (skillData && skillData.skills) {
+          skillSel.innerHTML = '<option value="">（未加载Skill）</option>' +
+            skillData.skills.map(s => `<option value="${s.id}">${s.name}</option>`).join("");
+        }
+        setStatus("Skill 目录已更新");
+      }
+    } catch (e) {
+      alert("保存失败: " + e.message);
+      setStatus("更新失败", true);
+    }
+  };
+
+  // 绑定一键重建知识库按钮
+  document.getElementById("rebuildRagBtn").onclick = async () => {
+    const btn = document.getElementById("rebuildRagBtn");
+    const statusText = document.getElementById("ragBuildStatus");
+    const progressWrap = document.getElementById("ragProgressBarWrap");
+    const progressBar = document.getElementById("ragProgressBar");
+
+    try {
+      btn.disabled = true;
+      btn.textContent = "⏳ 构建中...";
+      statusText.textContent = "正在启动任务...";
+      progressWrap.style.display = "block";
+      progressBar.style.width = "0%";
+
+      const res = await fetch(`${getRagUrl()}/api/build`, { method: "POST" });
+      const data = await res.json();
+      if (data.status === "running") {
+        alert("已有构建任务在运行，请稍候");
+        return;
+      }
+
+      const pollTimer = setInterval(async () => {
+        try {
+          const sres = await fetch(`${getRagUrl()}/api/build_status`);
+          const sdata = await sres.json();
+          
+          if (sdata.status === "running") {
+            const pct = sdata.total > 0 ? Math.round((sdata.progress / sdata.total) * 100) : 0;
+            progressBar.style.width = pct + "%";
+            statusText.textContent = sdata.message;
+          } else if (sdata.status === "completed") {
+            clearInterval(pollTimer);
+            progressBar.style.width = "100%";
+            statusText.textContent = sdata.message;
+            btn.disabled = false;
+            btn.textContent = "🔄 重建知识库";
+            alert("🎉 知识库构建完成！");
+          } else if (sdata.status === "failed") {
+            clearInterval(pollTimer);
+            statusText.textContent = sdata.message;
+            btn.disabled = false;
+            btn.textContent = "🔄 重建知识库";
+            alert("❌ 构建失败：" + sdata.message);
+          }
+        } catch (e) { console.error(e); }
+      }, 1500);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "🔄 重建知识库";
+      alert("请求失败：" + e.message);
+    }
+  };
+
   document.getElementById("compressBtn").onclick=compressContext;
   document.getElementById("compareBtn").onclick=()=>{setCompareMode(!cfg.compareMode)};
   document.getElementById("ragBtn").onclick=()=>{cfg.ragEnabled=!cfg.ragEnabled;saveLocal();updateRagBadge();if(cfg.ragEnabled) setStatus("知识库已开启");else setStatus("知识库已关闭");};
