@@ -193,6 +193,25 @@ async function saveEditMessage(idx){
 function branchFromMessage(idx){
   if(generating){alert("生成中，请先停止");return}
   const s=getCurrentSession();if(!s)return;
-  const newS={id:"s"+Date.now()+Math.random().toString(36).slice(2,7),title:(s.title||"对话")+" · 分支",messages:JSON.parse(JSON.stringify(s.messages.slice(0,idx+1))),createdAt:Date.now(),updatedAt:Date.now()};
-  sessions.unshift(newS);currentSessionId=newS.id;userWantsAutoScroll=true;updateJumpBtn();saveLocal();saveToDisk();renderSessions();renderMessages();restoreDraft();setStatus("已创建分支");
+  const newS={
+    id:"s"+Date.now()+Math.random().toString(36).slice(2,7),
+    title:(s.title||"对话")+" · 分支",
+    messages:JSON.parse(JSON.stringify(s.messages.slice(0,idx+1))),
+    createdAt:Date.now(),
+    updatedAt:Date.now(),
+    parentSessionId:s.id,
+    branchPointIdx:idx
+  };
+  sessions.unshift(newS);
+  currentSessionId=newS.id;
+  userWantsAutoScroll=true;
+  updateJumpBtn();
+  saveLocal();
+  saveToDisk();
+  renderSessions();
+  renderMessages();
+  restoreDraft();
+  setStatus("已创建分支");
+  if (typeof updateBreadcrumb === "function") updateBreadcrumb();
+  if (typeof updateParamBtnLabel === "function") updateParamBtnLabel();
 }

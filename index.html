@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>狸猫AI工具盒</title>
+<title>狸猫AI工具盒  v1.21 </title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" id="hljs-dark">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" id="hljs-light" disabled>
@@ -45,11 +45,13 @@
     
     <button class="rag-toggle" id="ragBtn" title="开启后从本地知识库检索相关上下文">📚 知识库 <span class="badge" id="ragBadge">关</span></button>
     <span class="spacer"></span>
+    <button class="icon-btn" id="paramBtn" title="会话级模型参数">🌡️ 参数</button>
     <button class="icon-btn" id="compressBtn" title="把早期对话压缩成摘要，节省上下文">🗜️</button>
     <span id="ctxInfo"></span>
     <span id="status" style="font-size:12px;color:var(--text-dim)"><span class="status-dot"></span>就绪</span>
     <button class="icon-btn" id="themeToggle" title="切换主题">🌙</button>
   </div>
+  <div id="breadcrumbBar" class="breadcrumb-bar" style="display:none"></div>
   <div id="messages"></div>
   <div id="msgNav"></div>
   <div class="nav-tip" id="navTip"></div>
@@ -165,7 +167,11 @@
   <div class="modal">
     <h2 id="presetTitle">编辑预设</h2>
     <div class="field"><label>名称</label><input type="text" id="presetName"></div>
-    <div class="field"><label>系统提示词</label><textarea id="presetPrompt" style="min-height:280px"></textarea></div>
+    <div class="field"><label>系统提示词</label><textarea id="presetPrompt" style="min-height:200px"></textarea></div>
+    <div class="field">
+      <label style="margin-bottom:8px">参数覆盖（不勾选则继承全局）</label>
+      <div id="presetParamBody"></div>
+    </div>
     <div class="modal-actions">
       <button id="closePresetEditBtn">取消</button>
       <button class="primary" id="savePresetEditBtn">保存</button>
@@ -183,6 +189,41 @@
     <div class="modal-actions">
       <button id="closeRegenModelModalBtn">取消</button>
       <button class="primary" id="regenConfirmBtn">确认重新生成</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="sessionParamMask">
+  <div class="modal" style="width:520px">
+    <h2>会话级参数</h2>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+      勾选的参数只对当前对话生效，不影响全局设置。<br>
+      优先级：<b>会话</b> &gt; <b>预设</b> &gt; <b>全局</b>
+    </div>
+    <div id="sessionParamBody"></div>
+    <div class="modal-actions">
+      <button id="closeSessionParamBtn">取消</button>
+      <button class="primary" id="saveSessionParamBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="skillComboMask">
+  <div class="modal" style="width:520px">
+    <h2>🧩 多 Skill 组合</h2>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+      勾选多个 Skill，system prompt 会按勾选顺序拼接。<br>
+      <b>多 Skill 模式下 RAG 检索自动使用全库</b>，避免跨 Skill 分库检索的复杂度。
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button id="skillComboSelectAll" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:12px;font-family:inherit">全选</button>
+      <button id="skillComboClearAll" style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:12px;font-family:inherit">清空</button>
+    </div>
+    <div id="skillComboList" class="skill-combo-list"></div>
+    <div id="skillComboStats" class="combo-stats"></div>
+    <div class="modal-actions">
+      <button id="skillComboCancel">取消</button>
+      <button class="primary" id="skillComboConfirm">应用</button>
     </div>
   </div>
 </div>

@@ -32,12 +32,17 @@ function saveSettings(){
   cfg.compareConcurrent = document.getElementById("cfgCompareConcurrent").checked;
   cfg.fontSize=parseInt(document.getElementById("cfgFontSize").value)||15;cfg.accent=document.getElementById("cfgAccent").value||"";
   saveLocal();applyFontSize();applyAccentColor();closeSettings();fetchModels();updateCtxInfo();
+  if(typeof updateParamBtnLabel === "function") updateParamBtnLabel();
 }
 
 function renderPresets(){
   const list=document.getElementById("presetList");
   if(!presets.length){list.innerHTML='<div style="color:var(--text-dim);font-size:13px">还没有预设</div>';return}
-  list.innerHTML=presets.map(p=>`<div class="preset-item"><span>${escapeHtml(p.name)}<span style="color:var(--text-dim);font-size:12px;margin-left:8px">(${p.prompt.length} 字)</span></span><span><button data-edit="${p.id}">编辑</button><button data-del="${p.id}">删除</button></span></div>`).join("");
+  list.innerHTML=presets.map(p=>{
+    const paramCount = p.params ? Object.keys(p.params).length : 0;
+    const paramTag = paramCount ? `<span style="color:var(--accent);font-size:12px;margin-left:6px">⚙ ${paramCount}项参数</span>` : "";
+    return `<div class="preset-item"><span>${escapeHtml(p.name)}<span style="color:var(--text-dim);font-size:12px;margin-left:8px">(${p.prompt.length} 字)</span>${paramTag}</span><span><button data-edit="${p.id}">编辑</button><button data-del="${p.id}">删除</button></span></div>`;
+  }).join("");
   list.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editPreset(b.dataset.edit));
   list.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{
     if(!confirm("删除？"))return;
@@ -45,10 +50,49 @@ function renderPresets(){
     saveLocal();saveToDisk();renderPresets();
   });
 }
-function addPreset(){editingPresetId=null;document.getElementById("presetTitle").textContent="新建预设";document.getElementById("presetName").value="";document.getElementById("presetPrompt").value="";document.getElementById("presetMask").classList.add("show")}
-function editPreset(id){const p=presets.find(x=>x.id===id);if(!p)return;editingPresetId=id;document.getElementById("presetTitle").textContent="编辑预设";document.getElementById("presetName").value=p.name;document.getElementById("presetPrompt").value=p.prompt;document.getElementById("presetMask").classList.add("show")}
+function addPreset(){
+  editingPresetId=null;
+  document.getElementById("presetTitle").textContent="新建预设";
+  document.getElementById("presetName").value="";
+  document.getElementById("presetPrompt").value="";
+  renderPresetParams({});
+  document.getElementById("presetMask").classList.add("show");
+}
+function editPreset(id){
+  const p=presets.find(x=>x.id===id);
+  if(!p)return;
+  editingPresetId=id;
+  document.getElementById("presetTitle").textContent="编辑预设";
+  document.getElementById("presetName").value=p.name;
+  document.getElementById("presetPrompt").value=p.prompt;
+  renderPresetParams(p.params || {});
+  document.getElementById("presetMask").classList.add("show");
+}
 function closePresetEdit(){document.getElementById("presetMask").classList.remove("show")}
-function savePresetEdit(){const name=document.getElementById("presetName").value.trim();const prompt=document.getElementById("presetPrompt").value;if(!name){alert("请填写名称");return}if(editingPresetId){const p=presets.find(x=>x.id===editingPresetId);p.name=name;p.prompt=prompt;}else{presets.push({id:"p"+Date.now(),name,prompt});}saveLocal();saveToDisk();renderPresets();closePresetEdit();}
+function savePresetEdit(){
+  const name=document.getElementById("presetName").value.trim();
+  const prompt=document.getElementById("presetPrompt").value;
+  if(!name){alert("请填写名称");return}
+
+  const params = {};
+  PARAM_KEYS.forEach(k => {
+    const cb = document.querySelector(`#presetParamBody .preset-param-override[data-key="${k}"]`);
+    if (cb && cb.checked) {
+      const inp = document.querySelector(`#presetParamBody .preset-param-num[data-key="${k}"]`);
+      if (inp && inp.value !== "") params[k] = parseFloat(inp.value);
+    }
+  });
+
+  if(editingPresetId){
+    const p=presets.find(x=>x.id===editingPresetId);
+    p.name=name;
+    p.prompt=prompt;
+    p.params = Object.keys(params).length ? params : undefined;
+  }else{
+    presets.push({id:"p"+Date.now(),name,prompt,params:Object.keys(params).length?params:undefined});
+  }
+  saveLocal();saveToDisk();renderPresets();closePresetEdit();
+}
 async function importPresetFolder(){
   try{
     const dir=await window.showDirectoryPicker({mode:"read"});
@@ -78,9 +122,47 @@ async function importPresetFolder(){
 
 function renderTplList(){
   const box=document.getElementById("tplList");if(!box)return;
-  if(!cfg.quickPrompts.length){box.innerHTML='<div style="color:var(--text-dim);font-size:13px;padding:4px 0">还没有模板</div>';return;}
-  box.innerHTML=cfg.quickPrompts.map((p,i)=>`<div class="tpl-row"><input type="text" class="tpl-input" data-idx="${i}" value="${escapeHtml(p)}" placeholder="模板文字"><button class="tpl-up" data-idx="${i}" title="上移" ${i===0?"disabled":""}>↑</button><button class="tpl-down" data-idx="${i}" title="下移" ${i===cfg.quickPrompts.length-1?"disabled":""}>↓</button><button class="tpl-del" data-idx="${i}" title="删除">🗑</button></div>`).join("");
-  box.querySelectorAll(".tpl-input").forEach(inp=>{inp.oninput=()=>{const i=parseInt(inp.dataset.idx);cfg.quickPrompts[i]=inp.value;saveLocal();renderQuickPrompts();};});
+  if(!cfg.quickPrompts.length){
+    box.innerHTML='<div style="color:var(--text-dim);font-size:13px;padding:4px 0">还没有模板</div>';
+    return;
+  }
+
+  // 变量插入提示条（中英对照）
+  const varsHint=`<div class="tpl-vars-hint">
+    <div style="margin-bottom:6px">💡 点击变量可插入到下方输入框，模板里同时支持中文和英文写法：</div>
+    <button class="tpl-var-chip" data-var="{{date}}">📅 日期 <code>{{date}}</code></button>
+    <button class="tpl-var-chip" data-var="{{time}}">🕐 时间 <code>{{time}}</code></button>
+    <button class="tpl-var-chip" data-var="{{session_title}}">💬 会话标题 <code>{{session_title}}</code></button>
+    <button class="tpl-var-chip" data-var="{{selected}}">✂️ 选中文本 <code>{{selected}}</code></button>
+    <button class="tpl-var-chip" data-var="{{clipboard}}">📋 剪贴板 <code>{{clipboard}}</code></button>
+    <div style="margin-top:6px;font-size:11px;opacity:.8">中文写法同样有效：{{日期}}、{{时间}}、{{会话标题}}、{{选中}}、{{剪贴板}}</div>
+  </div>`;
+
+  box.innerHTML=varsHint+cfg.quickPrompts.map((p,i)=>`<div class="tpl-row"><input type="text" class="tpl-input" data-idx="${i}" value="${escapeHtml(p)}" placeholder="模板文字，支持 {{date}} 或 {{日期}} 等变量"><button class="tpl-up" data-idx="${i}" title="上移" ${i===0?"disabled":""}>↑</button><button class="tpl-down" data-idx="${i}" title="下移" ${i===cfg.quickPrompts.length-1?"disabled":""}>↓</button><button class="tpl-del" data-idx="${i}" title="删除">🗑</button></div>`).join("");
+
+  box.querySelectorAll(".tpl-input").forEach(inp=>{
+    inp.onfocus=()=>{lastTplInputIdx=parseInt(inp.dataset.idx)};
+    inp.oninput=()=>{const i=parseInt(inp.dataset.idx);cfg.quickPrompts[i]=inp.value;saveLocal();renderQuickPrompts();};
+  });
+
+  // 变量 chip 点击，插入到最后聚焦的模板输入框
+  box.querySelectorAll(".tpl-var-chip").forEach(chip=>chip.onclick=()=>{
+    if(lastTplInputIdx<0){
+      alert("请先点击一个模板输入框，再点变量");
+      return;
+    }
+    const inp=box.querySelector(`.tpl-input[data-idx="${lastTplInputIdx}"]`);
+    if(!inp)return;
+    const v=chip.dataset.var;
+    const start=inp.selectionStart??inp.value.length;
+    const end=inp.selectionEnd??inp.value.length;
+    inp.value=inp.value.slice(0,start)+v+inp.value.slice(end);
+    cfg.quickPrompts[lastTplInputIdx]=inp.value;
+    saveLocal();renderQuickPrompts();
+    inp.focus();
+    inp.setSelectionRange(start+v.length,start+v.length);
+  });
+
   box.querySelectorAll(".tpl-up").forEach(b=>b.onclick=()=>moveTpl(parseInt(b.dataset.idx),-1));
   box.querySelectorAll(".tpl-down").forEach(b=>b.onclick=()=>moveTpl(parseInt(b.dataset.idx),1));
   box.querySelectorAll(".tpl-del").forEach(b=>b.onclick=()=>delTpl(parseInt(b.dataset.idx)));
@@ -112,4 +194,143 @@ async function resetEmo(){
     if(emojiData.emoji && Object.keys(emojiData.emoji).length > 0) {cfg.emoMap = emojiData.emoji;dynamicEmo = emojiData.emoji;saveLocal();renderEmoList();renderMessages();alert("已从 Python 后端重新加载颜文字！");}
     else {alert("后端返回为空，请检查 emoji_config.json 文件是否存在。");}
   } catch(e) {alert("拉取失败，请确认 RAG 秘书（Python黑框）已启动。");}
+}
+
+// ============ 预设参数覆盖区 ============
+
+function renderPresetParams(currentParams){
+  const box = document.getElementById("presetParamBody");
+  if (!box) return;
+  const labels = {
+    temperature: { label: "Temperature", min: 0, max: 2, step: 0.1, def: cfg.temperature },
+    top_p: { label: "Top P", min: 0, max: 1, step: 0.05, def: cfg.top_p },
+    num_ctx: { label: "num_ctx", min: 512, max: 131072, step: 512, def: cfg.num_ctx || 8192 },
+    num_predict: { label: "num_predict", min: 64, max: 8192, step: 64, def: cfg.num_predict || 1024 }
+  };
+  box.innerHTML = PARAM_KEYS.map(k => {
+    const info = labels[k];
+    const overridden = hasValue(currentParams[k]);
+    const val = overridden ? currentParams[k] : info.def;
+    return `<div class="param-field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" class="preset-param-override" data-key="${k}" ${overridden?"checked":""}>
+        <span>${info.label}</span>
+      </label>
+      <div class="param-row">
+        <input type="range" class="preset-param-range" data-key="${k}" min="${info.min}" max="${info.max}" step="${info.step}" value="${val}">
+        <input type="number" class="preset-param-num" data-key="${k}" min="${info.min}" max="${info.max}" step="${info.step}" value="${val}">
+      </div>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".preset-param-range").forEach(r => r.oninput = () => {
+    const num = box.querySelector(`.preset-param-num[data-key="${r.dataset.key}"]`);
+    if (num) num.value = r.value;
+  });
+  box.querySelectorAll(".preset-param-num").forEach(n => n.oninput = () => {
+    const range = box.querySelector(`.preset-param-range[data-key="${n.dataset.key}"]`);
+    if (range) range.value = n.value;
+  });
+}
+
+// ============ 会话级参数弹窗 ============
+
+function openSessionParams(){
+  const s = getCurrentSession();
+  if (!s) { alert("请先创建一个对话"); return; }
+  editingSessionParams = s.params ? { ...s.params } : {};
+  renderSessionParamsModal();
+  document.getElementById("sessionParamMask").classList.add("show");
+}
+
+function closeSessionParams(){
+  document.getElementById("sessionParamMask").classList.remove("show");
+  editingSessionParams = null;
+}
+
+function renderSessionParamsModal(){
+  const box = document.getElementById("sessionParamBody");
+  if (!box) return;
+  if (!editingSessionParams) editingSessionParams = {};
+  const labels = {
+    temperature: { label: "Temperature", min: 0, max: 2, step: 0.1 },
+    top_p: { label: "Top P", min: 0, max: 1, step: 0.05 },
+    num_ctx: { label: "num_ctx 上下文窗口", min: 512, max: 131072, step: 512 },
+    num_predict: { label: "num_predict 最大输出", min: 64, max: 8192, step: 64 }
+  };
+  const srcTag = (src) => {
+    if (src === "session") return '<span class="param-src src-session">会话</span>';
+    if (src === "preset") return '<span class="param-src src-preset">预设</span>';
+    return '<span class="param-src src-global">全局</span>';
+  };
+  box.innerHTML = PARAM_KEYS.map(k => {
+    const info = labels[k];
+    const resolved = resolveParam(k);
+    const overridden = hasValue(editingSessionParams[k]);
+    const val = overridden ? editingSessionParams[k] : resolved.value;
+    return `<div class="field param-field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" class="param-override" data-key="${k}" ${overridden?"checked":""}>
+        <span>${info.label}</span>
+        ${srcTag(resolved.source)}
+      </label>
+      <div class="param-row">
+        <input type="range" class="param-range" data-key="${k}" min="${info.min}" max="${info.max}" step="${info.step}" value="${val}">
+        <input type="number" class="param-num" data-key="${k}" min="${info.min}" max="${info.max}" step="${info.step}" value="${val}">
+      </div>
+    </div>`;
+  }).join("");
+
+  box.querySelectorAll(".param-override").forEach(cb => cb.onchange = () => {
+    const k = cb.dataset.key;
+    if (cb.checked) {
+      const resolved = resolveParam(k);
+      editingSessionParams[k] = resolved.value;
+    } else {
+      delete editingSessionParams[k];
+    }
+    renderSessionParamsModal();
+  });
+  box.querySelectorAll(".param-range").forEach(r => r.oninput = () => {
+    const k = r.dataset.key;
+    const num = box.querySelector(`.param-num[data-key="${k}"]`);
+    if (num) num.value = r.value;
+  });
+  box.querySelectorAll(".param-num").forEach(n => n.oninput = () => {
+    const k = n.dataset.key;
+    const range = box.querySelector(`.param-range[data-key="${k}"]`);
+    if (range) range.value = n.value;
+  });
+}
+
+function saveSessionParams(){
+  const s = getCurrentSession();
+  if (!s) return;
+  const box = document.getElementById("sessionParamBody");
+  if (!box) return;
+  const final = {};
+  PARAM_KEYS.forEach(k => {
+    const cb = box.querySelector(`.param-override[data-key="${k}"]`);
+    if (cb && cb.checked) {
+      const num = box.querySelector(`.param-num[data-key="${k}"]`);
+      if (num && num.value !== "") {
+        final[k] = parseFloat(num.value);
+      }
+    }
+  });
+  s.params = Object.keys(final).length ? final : undefined;
+  s.updatedAt = Date.now();
+  saveLocal(); saveToDisk();
+  updateParamBtnLabel();
+  updateCtxInfo();
+  setStatus("会话参数已保存");
+  closeSessionParams();
+}
+
+function updateParamBtnLabel(){
+  const s = getCurrentSession();
+  const btn = document.getElementById("paramBtn");
+  if (!btn) return;
+  const hasOverride = s && s.params && Object.keys(s.params).length > 0;
+  btn.classList.toggle("on", !!hasOverride);
+  btn.textContent = hasOverride ? "🌡️ 参数*" : "🌡️ 参数";
 }

@@ -6,14 +6,26 @@ function autoResize(ta){ta.style.height="auto";ta.style.height=Math.min(ta.scrol
 function renderQuickPrompts(){
   const box=document.getElementById("quickPrompts");if(!box)return;
   if(!cfg.quickPrompts||!cfg.quickPrompts.length){box.innerHTML="";return}
-  box.innerHTML=cfg.quickPrompts.map(p=>`<button class="quick-btn">${escapeHtml(p)}</button>`).join("");
+  box.innerHTML=cfg.quickPrompts.map((p,i)=>`<button class="quick-btn" data-idx="${i}">${escapeHtml(p)}</button>`).join("");
   box.querySelectorAll(".quick-btn").forEach(btn=>{
-    btn.onclick=()=>{
-      const input=document.getElementById("input");const prompt=btn.textContent;
-      if(prompt==="翻译")input.value=input.value?`请将以下内容翻译成中文：\n\n${input.value}`:"请将以下内容翻译成中文：\n\n";
-      else if(prompt==="总结")input.value=input.value?`请总结以下内容：\n\n${input.value}`:"请总结以下内容：\n\n";
-      else if(prompt==="改代码")input.value=input.value?`请优化以下代码：\n\n${input.value}`:"请优化以下代码：\n\n";
-      else input.value=input.value?`${prompt}\n\n${input.value}`:`${prompt}\n\n`;
+    btn.onmousedown=()=>{
+      // 点击前捕获选区，防止焦点转移后丢失
+      const sel=window.getSelection();
+      const t=sel?sel.toString():"";
+      if(t)cachedSelection=t;
+    };
+    btn.onclick=async()=>{
+      const input=document.getElementById("input");
+      const idx=parseInt(btn.dataset.idx);
+      const raw=cfg.quickPrompts[idx]||btn.textContent||"";
+      const prompt=await resolveTemplateVars(raw);
+
+      // 兼容旧行为：翻译 / 总结 / 改代码
+      if(raw==="翻译")input.value=input.value?`请将以下内容翻译成中文：\n\n${input.value}`:"请将以下内容翻译成中文：\n\n";
+      else if(raw==="总结")input.value=input.value?`请总结以下内容：\n\n${input.value}`:"请总结以下内容：\n\n";
+      else if(raw==="改代码")input.value=input.value?`请优化以下代码：\n\n${input.value}`:"请优化以下代码：\n\n";
+      else input.value=input.value?`${prompt}\n\n${input.value}`:prompt+"\n\n";
+
       autoResize(input);saveDraft();input.focus();
     };
   });

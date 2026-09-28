@@ -36,9 +36,21 @@ let allModelsCache = [];
 // 预设编辑临时 ID
 let editingPresetId = null;
 
-// 当前加载的 Skill
+// 当前加载的 Skill（单个）
 let currentSkillId = "";
 let currentSkillName = "";
+let currentSkillScope = "self";
+
+// ★ 多 Skill 组合
+let currentSkillIds = [];
+let skillMetaCache = {};
 
 // 流式保存节流
 let lastStreamSaveTs = 0;
+
+// 会话级参数弹窗编辑中的临时状态
+let editingSessionParams = null;
+
+// 模板变量：缓存最后一次非空选区
+let cachedSelection = "";
+let lastTplInputIdx = -1;

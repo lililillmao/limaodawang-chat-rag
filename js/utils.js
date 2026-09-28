@@ -66,3 +66,93 @@ function setStatus(txt, err){
   document.getElementById("status").innerHTML =
     `<span class="status-dot${err ? " err" : ""}"></span>${escapeHtml(txt)}`;
 }
+
+// ============ 会话分支树辅助 ============
+
+function getSessionById(id){
+  return sessions.find(s => s.id === id) || null;
+}
+
+// 从根到当前会话的完整链（根在前）
+function getSessionChain(id){
+  const chain = [];
+  const seen = new Set();
+  let cur = getSessionById(id);
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    chain.unshift(cur);
+    cur = cur.parentSessionId ? getSessionById(cur.parentSessionId) : null;
+  }
+  return chain;
+}
+
+// 会话深度：根为 0
+function getSessionDepth(id){
+  return Math.max(0, getSessionChain(id).length - 1);
+}
+
+// 会话的直接子分支
+function getSessionChildren(id){
+  return sessions.filter(s => s.parentSessionId === id);
+}
+
+// ============ 模板变量解析 ============
+// 同时支持英文和中文两种写法：
+//   {{date}} / {{日期}}
+//   {{time}} / {{时间}}
+//   {{session_title}} / {{会话标题}} / {{标题}}
+//   {{selected}} / {{选中}} / {{选中文本}}
+//   {{clipboard}} / {{剪贴板}}
+
+// 监听选区变化，只保留非空值
+// 点击按钮后选区会变空，所以不能用实时 selection
+document.addEventListener("selectionchange", () => {
+  const sel = window.getSelection();
+  const t = sel ? sel.toString() : "";
+  if (t) cachedSelection = t;
+});
+
+async function resolveTemplateVars(text) {
+  if (!text) return text;
+  let result = text;
+
+  // 日期 / 时间
+  const now = new Date();
+  const dateStr = now.getFullYear() + "-" +
+    String(now.getMonth() + 1).padStart(2, "0") + "-" +
+    String(now.getDate()).padStart(2, "0");
+  const timeStr = String(now.getHours()).padStart(2, "0") + ":" +
+    String(now.getMinutes()).padStart(2, "0");
+  result = result.replace(/\{\{\s*(?:date|日期)\s*\}\}/g, dateStr);
+  result = result.replace(/\{\{\s*(?:time|时间)\s*\}\}/g, timeStr);
+
+  // 会话标题
+  if (/\{\{\s*(?:session_title|会话标题|标题)\s*\}\}/.test(result)) {
+    const s = getCurrentSession();
+    const title = s ? (s.title || "") : "";
+    result = result.replace(/\{\{\s*(?:session_title|会话标题|标题)\s*\}\}/g, title);
+  }
+
+  // 选中文本
+  if (/\{\{\s*(?:selected|选中|选中文本)\s*\}\}/.test(result)) {
+    let selText = cachedSelection || "";
+    if (!selText) {
+      const sel = window.getSelection();
+      selText = sel ? sel.toString() : "";
+    }
+    result = result.replace(/\{\{\s*(?:selected|选中|选中文本)\s*\}\}/g, selText);
+  }
+
+  // 剪贴板
+  if (/\{\{\s*(?:clipboard|剪贴板)\s*\}\}/.test(result)) {
+    let clip = "";
+    try {
+      clip = await navigator.clipboard.readText();
+    } catch (e) {
+      console.warn("读取剪贴板失败（可能需要权限或非 localhost）", e);
+    }
+    result = result.replace(/\{\{\s*(?:clipboard|剪贴板)\s*\}\}/g, clip);
+  }
+
+  return result;
+}

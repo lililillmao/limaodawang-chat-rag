@@ -2,7 +2,11 @@ import os
 import glob
 import json
 import re
+import sys
+import time
 import hashlib
+import threading
+import subprocess
 import requests
 import chromadb
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -11,10 +15,21 @@ from pypdf import PdfReader
 import docx
 from pydantic import BaseModel
 
+# watchdog（可选依赖，缺失时降级为手动模式）
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    WATCHDOG_AVAILABLE = True
+except ImportError:
+    WATCHDOG_AVAILABLE = False
+    print("⚠️ 未安装 watchdog，文件自动监听不可用")
+    print("⚠️ 如需开启请运行：pip install watchdog")
+
 # ================= 配置加载 =================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 HASH_CACHE_PATH = os.path.join(SCRIPT_DIR, "file_hashes.json")
+HASH_CACHE_VERSION = 3
 
 DEFAULT_CONFIG = {
     "skill_dir": "./skills",
@@ -31,13 +46,13 @@ DEFAULT_CONFIG = {
     "safety_fallback_path": ""
 }
 
-# 构建进度全局状态
 BUILD_STATUS = {
-    "status": "idle",       # idle / running / completed / failed
+    "status": "idle",
     "message": "就绪",
     "progress": 0,
     "total": 0,
-    "current_file": ""
+    "current_file": "",
+    "trigger": "",       # ★ 本次构建的触发来源：manual / watchdog / startup
 }
 
 def load_config():
@@ -72,13 +87,31 @@ OLLAMA_URL = CONF["ollama_url"].rstrip("/")
 SAFETY_KEYWORDS = CONF.get("safety_keywords", []) or []
 SAFETY_FALLBACK_PATH = resolve_path(CONF.get("safety_fallback_path", ""))
 
-# 初始化 ChromaDB
+# ================= ChromaDB =================
 CHROMA_PATH = os.path.join(SCRIPT_DIR, "chroma_db")
 client = chromadb.PersistentClient(path=CHROMA_PATH)
-try:
-    collection = client.get_collection(name="skill_knowledge")
-except Exception:
-    collection = client.create_collection(name="skill_knowledge")
+COLLECTION_NAME = "skill_knowledge"
+
+def init_collection():
+    try:
+        col = client.get_collection(name=COLLECTION_NAME)
+        meta = getattr(col, "metadata", None) or {}
+        space = meta.get("hnsw:space", "")
+        if space != "cosine":
+            print("⚠️" * 20)
+            print(f"⚠️ 检测到向量库使用的是 '{space or 'L2（默认）'}' 距离，不是 cosine。")
+            print("⚠️ 相关度百分比会显示异常。")
+            print("⚠️ 请关闭本窗口，删除项目根目录下的 chroma_db 文件夹，再重启。")
+            print("⚠️" * 20)
+        return col
+    except Exception:
+        print("ℹ️ 新建向量库（cosine 距离）")
+        return client.create_collection(
+            name=COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"}
+        )
+
+collection = init_collection()
 
 app = FastAPI(title="RAG 知识库秘书")
 app.add_middleware(
@@ -91,6 +124,9 @@ app.add_middleware(
 # ================= 配置接口 =================
 class ConfigUpdate(BaseModel):
     skill_dir: str
+
+class OpenFolderReq(BaseModel):
+    path: str
 
 @app.get("/api/config")
 def get_config():
@@ -110,9 +146,11 @@ def update_config(update: ConfigUpdate):
     except Exception as e:
         print(f"⚠️ 写入 config.json 失败: {e}")
     print(f"🔄 Skill 目录已动态更新为: {BASE_SKILL_DIR}")
+    # ★ 目录变了，重启监听
+    restart_watcher()
     return {"status": "success", "skill_dir": new_dir}
 
-# ================= 知识库构建接口 =================
+# ================= 工具函数 =================
 def get_embedding(text):
     try:
         r = requests.post(f"{OLLAMA_URL}/api/embeddings", json={
@@ -160,27 +198,73 @@ def get_file_md5(filepath):
         print(f"⚠️ 计算 MD5 失败 {filepath}: {e}")
         return None
 
-def run_build_task():
+def find_skill_root(filepath, base_dir):
+    if not base_dir:
+        return ""
+    base_real = os.path.realpath(base_dir)
+    cur = os.path.dirname(os.path.realpath(filepath))
+    while True:
+        if cur == base_real:
+            return ""
+        if not cur.startswith(base_real):
+            return ""
+        if os.path.exists(os.path.join(cur, "SKILL.md")):
+            return os.path.relpath(cur, base_real)
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return ""
+        cur = parent
+
+def parse_rag_scope(skill_md_path):
+    try:
+        with open(skill_md_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        fm_match = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+        if fm_match:
+            m = re.search(r'rag_scope:\s*(\w+)', fm_match.group(1))
+            if m:
+                scope = m.group(1).strip().lower()
+                if scope in ("self", "all"):
+                    return scope
+    except Exception:
+        pass
+    return "self"
+
+# ================= 知识库构建 =================
+def run_build_task(trigger="manual"):
     global BUILD_STATUS
     BUILD_STATUS["status"] = "running"
     BUILD_STATUS["message"] = "正在扫描文件..."
     BUILD_STATUS["progress"] = 0
     BUILD_STATUS["total"] = 0
     BUILD_STATUS["current_file"] = ""
+    BUILD_STATUS["trigger"] = trigger
 
     if not os.path.exists(BASE_SKILL_DIR):
         BUILD_STATUS["status"] = "failed"
         BUILD_STATUS["message"] = f"Skill 目录不存在: {BASE_SKILL_DIR}"
         return
 
-    # 读取历史哈希
+    try:
+        current_count = collection.count()
+    except Exception:
+        current_count = 0
+    force_full = (current_count == 0)
+
     old_hashes = {}
-    if os.path.exists(HASH_CACHE_PATH):
+    if os.path.exists(HASH_CACHE_PATH) and not force_full:
         try:
             with open(HASH_CACHE_PATH, 'r', encoding='utf-8') as f:
-                old_hashes = json.load(f)
+                cached = json.load(f)
+            if cached.get("__version__") != HASH_CACHE_VERSION:
+                print(f"⚠️ 哈希缓存 schema 版本不匹配（旧={cached.get('__version__')}，新={HASH_CACHE_VERSION}），将全量重建")
+                old_hashes = {}
+            else:
+                old_hashes = {k: v for k, v in cached.items() if k != "__version__"}
         except Exception as e:
             print(f"⚠️ 读取 hash 缓存失败: {e}")
+    elif force_full:
+        print(f"ℹ️ 向量库为空（count=0），将全量重建")
 
     files = glob.glob(os.path.join(BASE_SKILL_DIR, "**", "*"), recursive=True)
     valid_files = [f for f in files if os.path.isfile(f)]
@@ -189,14 +273,14 @@ def run_build_task():
     new_hashes = {}
     processed_count = 0
     total_chunks = 0
+    skipped_count = 0
 
     for filepath in valid_files:
         processed_count += 1
         file_name = os.path.basename(filepath)
         BUILD_STATUS["current_file"] = file_name
         BUILD_STATUS["message"] = f"正在处理: {file_name} ({processed_count}/{BUILD_STATUS['total']})"
-        
-        # 计算 MD5
+
         current_md5 = get_file_md5(filepath)
         if not current_md5:
             BUILD_STATUS["progress"] = processed_count
@@ -204,15 +288,13 @@ def run_build_task():
 
         new_hashes[filepath] = current_md5
 
-        # 增量判断
-        if filepath in old_hashes and old_hashes[filepath] == current_md5:
-            # 文件未修改，跳过
+        if not force_full and filepath in old_hashes and old_hashes[filepath] == current_md5:
             BUILD_STATUS["progress"] = processed_count
+            skipped_count += 1
             continue
 
         print(f"🔄 检测到文件变化，重建中: {file_name}")
-        
-        # 删除旧数据
+
         try:
             old_data = collection.get(where={"source": filepath})
             if old_data and old_data["ids"]:
@@ -221,12 +303,12 @@ def run_build_task():
         except Exception as e:
             print(f"  ⚠️ 删除旧数据失败: {e}")
 
-        # 读取新内容
         content = read_file_content(filepath)
         if not content or len(content.strip()) < 10:
             BUILD_STATUS["progress"] = processed_count
             continue
 
+        skill_id = find_skill_root(filepath, BASE_SKILL_DIR)
         chunks = split_text(content)
         for i, chunk in enumerate(chunks):
             emb = get_embedding(chunk)
@@ -235,17 +317,35 @@ def run_build_task():
                 collection.add(
                     documents=[chunk],
                     embeddings=[emb],
-                    metadatas=[{"source": filepath, "chunk": i}],
+                    metadatas=[{
+                        "source": filepath,
+                        "chunk": i,
+                        "skill_id": skill_id,
+                    }],
                     ids=[chunk_id]
                 )
                 total_chunks += 1
 
         BUILD_STATUS["progress"] = processed_count
 
-    # 清理已被删除的文件对应的哈希记录
-    final_hashes = {}
-    for k, v in new_hashes.items():
-        final_hashes[k] = v
+    # 清理已被删除的文件的向量
+    try:
+        existing_sources = set(new_hashes.keys())
+        all_meta = collection.get(include=["metadatas"])
+        if all_meta and all_meta.get("metadatas"):
+            to_delete = []
+            for i, meta in enumerate(all_meta["metadatas"]):
+                src = meta.get("source", "")
+                if src and src not in existing_sources:
+                    to_delete.append(all_meta["ids"][i])
+            if to_delete:
+                collection.delete(ids=to_delete)
+                print(f"🗑️ 清理已删除文件的向量：{len(to_delete)} 个片段")
+    except Exception as e:
+        print(f"⚠️ 清理已删除文件失败: {e}")
+
+    final_hashes = {"__version__": HASH_CACHE_VERSION}
+    final_hashes.update(new_hashes)
     try:
         with open(HASH_CACHE_PATH, 'w', encoding='utf-8') as f:
             json.dump(final_hashes, f, ensure_ascii=False, indent=2)
@@ -253,21 +353,118 @@ def run_build_task():
         print(f"⚠️ 写入 hash 缓存失败: {e}")
 
     BUILD_STATUS["status"] = "completed"
-    BUILD_STATUS["message"] = f"构建完成！新增/更新 {total_chunks} 个片段"
-    print(f"✅ {BUILD_STATUS['message']}")
+    if total_chunks == 0 and skipped_count > 0:
+        BUILD_STATUS["message"] = f"无需更新（{skipped_count} 个文件均无变化）"
+    else:
+        BUILD_STATUS["message"] = f"构建完成！新增/更新 {total_chunks} 个片段（跳过 {skipped_count} 个未变化文件）"
+    print(f"✅ [{trigger}] {BUILD_STATUS['message']}")
 
 @app.post("/api/build")
 async def build_knowledge_base(background_tasks: BackgroundTasks):
     global BUILD_STATUS
     if BUILD_STATUS["status"] == "running":
         return {"status": "running", "message": "已有构建任务在运行中"}
-    
-    background_tasks.add_task(run_build_task)
-    return {"status": "started", "message": "构建任务已在后台启动，请通过 /api/build_status 查询进度"}
+    background_tasks.add_task(run_build_task, "manual")
+    return {"status": "started", "message": "构建任务已在后台启动"}
 
 @app.get("/api/build_status")
 def get_build_status():
     return BUILD_STATUS
+
+# ================= ★ 文件监听 =================
+_watch_lock = threading.Lock()
+_pending_rebuild = False
+_watch_observer = None
+
+def _schedule_rebuild(reason=""):
+    """防抖触发增量重建。如果正在构建，标记 pending，构建完后自动重跑。"""
+    global _pending_rebuild
+    with _watch_lock:
+        if BUILD_STATUS["status"] == "running":
+            _pending_rebuild = True
+            print(f"⏳ 检测到文件变化（{reason}），但正在构建，稍后自动重试")
+            return
+    t = threading.Thread(target=_run_and_check_pending, args=(reason,), daemon=True)
+    t.start()
+
+def _run_and_check_pending(reason=""):
+    global _pending_rebuild
+    run_build_task(trigger=f"watchdog:{reason}" if reason else "watchdog")
+    with _watch_lock:
+        again = _pending_rebuild
+        _pending_rebuild = False
+    if again:
+        print("🔄 检测到构建期间又有文件变化，重新扫描")
+        time.sleep(0.5)
+        _run_and_check_pending(reason)
+
+if WATCHDOG_AVAILABLE:
+    class SkillDirHandler(FileSystemEventHandler):
+        def __init__(self):
+            self._timer = None
+            self._lock = threading.Lock()
+            # 忽略临时文件 / 编辑器缓存 / 我们自己的产物
+            self._ignore = re.compile(
+                r'(~$|\.tmp$|\.swp$|\.swx$|\.bak$|\.crdownload$|\.part$|'
+                r'\\chroma_db\\|\\__pycache__\\|\.DS_Store$|Thumbs\.db$|'
+                r'file_hashes\.json$|conversations\.json$)',
+                re.IGNORECASE
+            )
+
+        def _should_ignore(self, path):
+            return bool(self._ignore.search(path))
+
+        def _trigger(self, path):
+            base = os.path.basename(path)
+            _schedule_rebuild(base)
+
+        def on_any_event(self, event):
+            if event.is_directory:
+                return
+            path = event.src_path
+            if self._should_ignore(path):
+                return
+            # 防抖：2 秒内的连续事件合并为一次
+            with self._lock:
+                if self._timer:
+                    self._timer.cancel()
+                self._timer = threading.Timer(2.0, self._trigger, args=(path,))
+                self._timer.daemon = True
+                self._timer.start()
+
+def start_watcher():
+    global _watch_observer
+    if not WATCHDOG_AVAILABLE:
+        return
+    if not os.path.exists(BASE_SKILL_DIR):
+        print(f"⚠️ Skill 目录不存在，无法启动文件监听: {BASE_SKILL_DIR}")
+        return
+    stop_watcher()
+    try:
+        handler = SkillDirHandler()
+        observer = Observer()
+        observer.schedule(handler, BASE_SKILL_DIR, recursive=True)
+        observer.daemon = True
+        observer.start()
+        _watch_observer = observer
+        print(f"👀 已启动文件监听：{BASE_SKILL_DIR}")
+        print(f"   （修改文件后约 2 秒会自动增量更新，无需手动点“重建知识库”）")
+    except Exception as e:
+        print(f"⚠️ 启动文件监听失败: {e}")
+
+def stop_watcher():
+    global _watch_observer
+    if _watch_observer:
+        try:
+            _watch_observer.stop()
+            _watch_observer.join(timeout=3)
+        except Exception:
+            pass
+        _watch_observer = None
+
+def restart_watcher():
+    stop_watcher()
+    start_watcher()
 
 # ================= 其他接口 =================
 def is_path_inside(base, target):
@@ -278,7 +475,13 @@ def is_path_inside(base, target):
 
 @app.get("/")
 def read_root():
-    return {"status": "RAG 秘书已启动", "folder": BASE_SKILL_DIR, "config": CONFIG_PATH}
+    return {
+        "status": "RAG 秘书已启动",
+        "folder": BASE_SKILL_DIR,
+        "config": CONFIG_PATH,
+        "watchdog": WATCHDOG_AVAILABLE,
+        "watching": _watch_observer is not None,
+    }
 
 @app.get("/api/skills")
 def list_skills():
@@ -296,7 +499,8 @@ def list_skills():
                 name = folder_name
                 match = re.search(r'name:\s*(.*)', content)
                 if match: name = match.group(1).strip()
-                skills_list.append({"id": skill_id, "name": name, "path": root})
+                scope = parse_rag_scope(skill_md_path)
+                skills_list.append({"id": skill_id, "name": name, "path": root, "rag_scope": scope})
             except Exception as e:
                 print(f"⚠️ 读取 {skill_md_path} 失败: {e}")
     return {"skills": skills_list}
@@ -309,44 +513,111 @@ def get_skill_content(skill_id: str):
     if not is_path_inside(BASE_SKILL_DIR, skill_path): return {"content": "", "error": "非法路径"}
     if not os.path.exists(skill_path): return {"content": "", "error": "SKILL.md 未找到"}
     try:
-        with open(skill_path, "r", encoding="utf-8") as f: content = f.read()
-    except Exception as e: return {"content": "", "error": str(e)}
+        with open(skill_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return {"content": "", "error": str(e)}
+
+    rag_scope = parse_rag_scope(skill_path)
+
     emoji = {}
     emoji_path = os.path.join(skill_dir, "emoji_config.json")
     if os.path.exists(emoji_path):
         try:
-            with open(emoji_path, "r", encoding="utf-8") as f: emoji = json.load(f)
-        except Exception as e: print(f"⚠️ 读取 {emoji_path} 失败: {e}")
-    return {"content": content, "name": skill_id, "emoji": emoji}
+            with open(emoji_path, "r", encoding="utf-8") as f:
+                emoji = json.load(f)
+        except Exception as e:
+            print(f"⚠️ 读取 {emoji_path} 失败: {e}")
+
+    return {
+        "content": content,
+        "name": skill_id,
+        "emoji": emoji,
+        "rag_scope": rag_scope,
+    }
 
 @app.get("/api/search")
-def search(query: str, top_k: int = 3):
-    if not query: return {"results": [], "safety_flag": False}
+def search(query: str, top_k: int = 3, skill_id: str = "", scope: str = "self"):
+    if not query:
+        return {"results": [], "safety_flag": False}
+
     if SAFETY_KEYWORDS and any(kw in query for kw in SAFETY_KEYWORDS):
         safety_text = ""
         if SAFETY_FALLBACK_PATH and os.path.exists(SAFETY_FALLBACK_PATH):
             try:
-                with open(SAFETY_FALLBACK_PATH, "r", encoding="utf-8") as f: safety_text = f.read()
-            except Exception as e: print(f"⚠️ 读取安全兜底文件失败: {e}")
+                with open(SAFETY_FALLBACK_PATH, "r", encoding="utf-8") as f:
+                    safety_text = f.read()
+            except Exception as e:
+                print(f"⚠️ 读取安全兜底文件失败: {e}")
         if not safety_text:
             safety_text = ("你刚说的这个，我有点担心。现在有人能陪着你吗？如果情况紧急，打 110 或 120。心理援助热线 12356。")
         print(f"🚨 触发安全拦截：{query}")
         return {"results": [{"content": safety_text, "source": "safety_override", "distance": 0.0}], "safety_flag": True}
+
     emb = get_embedding(query)
-    if not emb: return {"results": [], "safety_flag": False, "error": "向量服务不可用"}
+    if not emb:
+        return {"results": [], "safety_flag": False, "error": "向量服务不可用"}
+
+    where = None
+    if scope == "self" and skill_id:
+        where = {"skill_id": skill_id}
+
     try:
-        results = collection.query(query_embeddings=[emb], n_results=top_k)
+        results = collection.query(
+            query_embeddings=[emb],
+            n_results=top_k,
+            where=where
+        )
         output = []
         if results.get('documents') and len(results['documents']) > 0:
             for i in range(len(results['documents'][0])):
                 output.append({
                     "content": results['documents'][0][i],
                     "source": results['metadatas'][0][i]['source'],
+                    "skill_id": results['metadatas'][0][i].get('skill_id', ''),
                     "distance": results['distances'][0][i] if 'distances' in results else 0
                 })
         return {"results": output, "safety_flag": False}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/open_folder")
+def open_folder(req: OpenFolderReq):
+    file_path = os.path.normpath(req.path.strip())
+    if not file_path:
+        raise HTTPException(status_code=400, detail="路径不能为空")
+    if not is_path_inside(BASE_SKILL_DIR, file_path):
+        raise HTTPException(status_code=403, detail="路径不在知识库目录内")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select," + file_path])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", file_path])
+        else:
+            folder = os.path.dirname(file_path)
+            subprocess.Popen(["xdg-open", folder])
+        return {"status": "success", "message": "已在文件管理器中打开"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ================= 启动 =================
+@app.on_event("startup")
+def on_startup():
+    # 启动文件监听
+    start_watcher()
+    # 启动后延迟扫一次，把上次没建完的补齐
+    def initial_scan():
+        time.sleep(2.0)
+        print("🔍 启动时扫描知识库...")
+        _schedule_rebuild("startup")
+    threading.Thread(target=initial_scan, daemon=True).start()
+
+@app.on_event("shutdown")
+def on_shutdown():
+    stop_watcher()
 
 if __name__ == "__main__":
     import uvicorn
@@ -354,6 +625,11 @@ if __name__ == "__main__":
     print(f"📂 配置文件: {CONFIG_PATH}")
     print(f"📂 Skill 目录: {BASE_SKILL_DIR}")
     print(f"📂 向量模型: {EMBED_MODEL} @ {OLLAMA_URL}")
+    try:
+        print(f"📂 向量库现有: {collection.count()} 个片段")
+    except Exception:
+        print(f"📂 向量库现有: 0 个片段")
     if not os.path.exists(BASE_SKILL_DIR):
         print(f"⚠️ 警告：Skill 目录不存在！请修改 config.json 里的 skill_dir")
+    print(f"👀 文件监听: {'已启用' if WATCHDOG_AVAILABLE else '未安装 watchdog（pip install watchdog）'}")
     uvicorn.run(app, host=CONF["host"], port=int(CONF["port"]))

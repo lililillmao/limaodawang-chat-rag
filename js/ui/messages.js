@@ -1,7 +1,16 @@
 // ============ 消息渲染 + 消息导航 + 引用 + 朗读 ============
 
 function contextTokens(s){if(!s)return 0;let t=0;const sys=getActiveSystemPrompt();if(sys)t+=estimateTokens(sys);for(const m of s.messages){if(m.isSummary){t+=estimateTokens(m.content);continue}if(m.compare){for(const c of m.compare)t+=estimateTokens(c.content)+estimateTokens(c.thinking||"")}else t+=estimateTokens(m.content)+estimateTokens(m.thinking||"")}return t}
-function updateCtxInfo(){const s=getCurrentSession();const used=contextTokens(s);const max=cfg.num_ctx||8192;const pct=Math.round(used/max*100);const el=document.getElementById("ctxInfo");if(!el)return;el.textContent=`≈ ${used}/${max} (${pct}%)`;el.style.color=pct>85?"#e34b4b":pct>60?"#f0a020":"var(--text-dim)"}
+function updateCtxInfo(){
+  const s=getCurrentSession();
+  const used=contextTokens(s);
+  const max=getEffectiveParams().num_ctx||8192;
+  const pct=Math.round(used/max*100);
+  const el=document.getElementById("ctxInfo");
+  if(!el)return;
+  el.textContent=`≈ ${used}/${max} (${pct}%)`;
+  el.style.color=pct>85?"#e34b4b":pct>60?"#f0a020":"var(--text-dim)";
+}
 
 function toggleStar(idx) {
     const s = getCurrentSession();
@@ -141,6 +150,42 @@ function bindMsgActions(wrap,m,idx){
   wrap.querySelectorAll(".cmp-export").forEach((b,i)=>{if(m.compare&&m.compare[i]){const c=m.compare[i];b.onclick=()=>{const {thinking,content}=getThinkAndContent(c);exportSingleAnswer({model:c.model,content,thinking,skillName:m.skillName})};}});
   wrap.querySelectorAll(".think-box").forEach(tb=>{const head=tb.querySelector(".think-head");if(head&&!head.onclick)head.onclick=()=>{tb.classList.toggle("open");tb.dataset.userToggled="1"};});
   wrap.querySelectorAll(".rag-source-head").forEach(head=>{if(head&&!head.onclick)head.onclick=()=>head.parentElement.classList.toggle("open");});
+
+  // RAG 引用相关按钮
+  wrap.querySelectorAll(".rag-toggle-btn").forEach(btn=>{
+    btn.onclick=()=>{
+      const item = btn.closest(".rag-source-item");
+      if(!item) return;
+      const preview = item.querySelector(".rag-source-preview");
+      const full = item.querySelector(".rag-source-full");
+      if(!preview || !full) return;
+      const isExpanded = full.style.display !== "none";
+      if(isExpanded){
+        full.style.display = "none";
+        preview.style.display = "";
+        btn.textContent = "展开全文";
+      }else{
+        full.style.display = "";
+        preview.style.display = "none";
+        btn.textContent = "收起";
+      }
+    };
+  });
+  wrap.querySelectorAll(".rag-copy-btn").forEach(btn=>{
+    btn.onclick=()=>{
+      const item = btn.closest(".rag-source-item");
+      if(!item) return;
+      const full = item.querySelector(".rag-source-full");
+      const text = full ? full.textContent : "";
+      copyText(text, btn);
+    };
+  });
+  wrap.querySelectorAll(".rag-open-btn").forEach(btn=>{
+    btn.onclick=()=>{
+      const path = btn.dataset.path;
+      if(path) openLocalFolder(path);
+    };
+  });
 }
 
 function renderAiBody(m,isStreamingLast){
@@ -153,6 +198,46 @@ function renderAiBody(m,isStreamingLast){
   const cursor=(isStreamingLast&&generating)?'<span class="cursor"></span>':"";
   html+=`<div class="msg-content">${renderMarkdown(content)}${cursor}</div>`;
   return html;
+}
+
+// ============ RAG 引用卡片渲染 ============
+function buildRagSourcesHtml(sources){
+  if(!sources || !sources.length) return "";
+
+  const items = sources.map((src, i) => {
+    // ★ 改用 cosine 距离：distance 范围 0~2，映射为百分比
+    // distance=0 → 100%，distance=1 → 50%，distance=2 → 0%
+    let scoreHtml = "";
+    if(src.distance != null){
+      let score = Math.round((1 - src.distance) * 100);
+      if (score < 0) score = 0;
+      if (score > 100) score = 100;
+      const cls = score >= 80 ? "score-high" : score >= 60 ? "score-mid" : "score-low";
+      scoreHtml = `<span class="rag-source-score ${cls}" title="相关度（cosine distance=${src.distance.toFixed(3)}）">相关度 ${score}%</span>`;
+    }
+    const preview = src.content.length > 150 ? src.content.slice(0, 150) + "…" : src.content;
+    const isSafety = src.isSafety;
+    const sourceName = isSafety ? "🛡️ 安全兜底" : `📄 ${escapeHtml(src.name)}`;
+    const openBtnHtml = (!isSafety && src.fullPath)
+      ? `<button class="rag-src-btn rag-open-btn" data-path="${escapeHtml(src.fullPath)}" title="打开文件所在目录">📂 打开目录</button>`
+      : "";
+
+    return `<div class="rag-source-item" data-rag-idx="${i}">
+      <div class="rag-source-head-row">
+        <span class="rag-source-name" title="${escapeHtml(src.fullPath || src.name)}">${sourceName}</span>
+        ${scoreHtml}
+      </div>
+      <div class="rag-source-text rag-source-preview">${escapeHtml(preview)}</div>
+      <div class="rag-source-text rag-source-full" style="display:none">${escapeHtml(src.content)}</div>
+      <div class="rag-source-actions">
+        <button class="rag-src-btn rag-toggle-btn">展开全文</button>
+        <button class="rag-src-btn rag-copy-btn" title="复制这段内容">📋 复制</button>
+        ${openBtnHtml}
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<div class="rag-source-box"><div class="rag-source-head"><span class="rag-arrow"></span><span class="rag-icon">📚</span><span>已引用 ${sources.length} 个知识库片段</span></div><div class="rag-source-list">${items}</div></div>`;
 }
 
 function buildMessageInner(m,isStreamingLast,idx){
@@ -187,12 +272,8 @@ function buildMessageInner(m,isStreamingLast,idx){
     const cur=(m.currentVersion||0)+1;const total=m.versions.length;
     versionNav=`<span class="version-nav"><button class="ver-prev" title="上一个版本" ${m.currentVersion<=0?"disabled":""}>◀</button><span>${cur} / ${total}</span><button class="ver-next" title="下一个版本" ${m.currentVersion>=total-1?"disabled":""}>▶</button></span>`;
   }
-  
-  let ragHtml = "";
-  if (m.ragSources && m.ragSources.length > 0) {
-    const items = m.ragSources.map(src => `<div class="rag-source-item"><span class="rag-source-name">📄 ${escapeHtml(src.name)}</span><div class="rag-source-text">${escapeHtml(src.content.slice(0, 150))}${src.content.length > 150 ? '...' : ''}</div></div>`).join("");
-    ragHtml = `<div class="rag-source-box"><div class="rag-source-head"><span class="rag-arrow"></span><span class="rag-icon">📚</span><span>已引用 ${m.ragSources.length} 个知识库片段</span></div><div class="rag-source-list">${items}</div></div>`;
-  }
+
+  const ragHtml = buildRagSourcesHtml(m.ragSources);
 
   const body=renderAiBody(m,isStreamingLast);
   let actions="";

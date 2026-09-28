@@ -80,3 +80,32 @@ function applyTheme() {
   document.getElementById("hljs-light").disabled = cfg.theme === "dark";
   applyAccentColor();
 }
+
+// ============ 参数三级继承 ============
+// 全局 cfg → 预设 params → 会话 params
+
+const PARAM_KEYS = ["temperature", "top_p", "num_ctx", "num_predict"];
+
+function hasValue(v) {
+  return v !== undefined && v !== null && v !== "";
+}
+
+function resolveParam(key) {
+  const s = getCurrentSession();
+  if (s && s.params && hasValue(s.params[key])) {
+    return { value: s.params[key], source: "session" };
+  }
+  if (currentPresetId) {
+    const p = presets.find(x => x.id === currentPresetId);
+    if (p && p.params && hasValue(p.params[key])) {
+      return { value: p.params[key], source: "preset" };
+    }
+  }
+  return { value: cfg[key], source: "global" };
+}
+
+function getEffectiveParams() {
+  const out = {};
+  for (const k of PARAM_KEYS) out[k] = resolveParam(k).value;
+  return out;
+}

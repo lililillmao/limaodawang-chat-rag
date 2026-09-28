@@ -36,15 +36,16 @@ async function fetchModels(){
 
 async function streamRequest(model, messages, onChunk, onDone, onError, signal){
   try{
+    const ep = getEffectiveParams();
     const body = {
       model,
       messages,
       stream: true,
       options: {
-        temperature: cfg.temperature,
-        top_p: cfg.top_p,
-        num_ctx: cfg.num_ctx || 8192,
-        num_predict: cfg.num_predict || 1024,
+        temperature: ep.temperature,
+        top_p: ep.top_p,
+        num_ctx: ep.num_ctx || 8192,
+        num_predict: ep.num_predict || 1024,
         repeat_penalty: 1.15,
         repeat_last_n: 256,
         stop: ["<|im_end|>", "\n用户：", "\n\n用户："]
@@ -88,16 +89,31 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal){
 
 async function fetchRagContext(query){
   try{
-    const url = `${getRagUrl()}/api/search?query=${encodeURIComponent(query)}&top_k=3`;
+    const params = new URLSearchParams({ query, top_k: 3 });
+    if (currentSkillIds.length === 1 && currentSkillScope === "self") {
+      params.set("skill_id", currentSkillIds[0]);
+      params.set("scope", "self");
+    } else {
+      params.set("scope", "all");
+    }
+    const url = `${getRagUrl()}/api/search?${params.toString()}`;
     const res = await fetch(url);
     if(!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     if(data.results && data.results.length > 0){
       const contextText = data.results.map(r => `[来源: ${r.source || '未知'}]\n${r.content}`).join("\n\n---\n\n");
       const sources = data.results.map(r => {
-        let name = r.source || '未知';
+        const fullPath = r.source || "";
+        let name = fullPath || "未知";
         name = name.split(/[\\/]/).pop();
-        return {name, content: r.content};
+        return {
+          name,
+          content: r.content,
+          fullPath,
+          distance: (r.distance != null ? r.distance : null),
+          skillId: r.skill_id || "",
+          isSafety: r.source === "safety_override",
+        };
       });
       return {context: contextText, sources, safety_flag: data.safety_flag};
     }
@@ -105,4 +121,23 @@ async function fetchRagContext(query){
     console.error("⚠️ RAG 检索失败:", e);
   }
   return null;
+}
+
+async function openLocalFolder(fullPath){
+  if(!fullPath) return;
+  try{
+    const res = await fetch(`${getRagUrl()}/api/open_folder`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ path: fullPath })
+    });
+    const data = await res.json();
+    if(!res.ok){
+      alert("打开失败：" + (data.detail || res.status));
+      return;
+    }
+    setStatus("已在文件管理器中打开");
+  }catch(e){
+    alert("请求失败：" + e.message);
+  }
 }

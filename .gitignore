@@ -1,8 +1,32 @@
+# 本地配置
 config.json
-file_hashes.json
+
+# 向量库 & 缓存
 chroma_db/
+file_hashes.json
+
+# 会话文件（如果绑定了本地目录）
 conversations.json
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.bak
+~$*

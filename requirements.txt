@@ -4,3 +4,4 @@ chromadb
 pypdf
 python-docx
 requests
+watchdog
