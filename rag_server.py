@@ -9,7 +9,8 @@ import threading
 import subprocess
 import requests
 import chromadb
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import math
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pypdf import PdfReader
 import docx
@@ -29,6 +30,7 @@ except ImportError:
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 HASH_CACHE_PATH = os.path.join(SCRIPT_DIR, "file_hashes.json")
+MEMORY_PATH = os.path.join(SCRIPT_DIR, "memory.json")
 HASH_CACHE_VERSION = 3
 
 DEFAULT_CONFIG = {
@@ -52,7 +54,7 @@ BUILD_STATUS = {
     "progress": 0,
     "total": 0,
     "current_file": "",
-    "trigger": "",       # ★ 本次构建的触发来源：manual / watchdog / startup
+    "trigger": "",
 }
 
 def load_config():
@@ -91,27 +93,30 @@ SAFETY_FALLBACK_PATH = resolve_path(CONF.get("safety_fallback_path", ""))
 CHROMA_PATH = os.path.join(SCRIPT_DIR, "chroma_db")
 client = chromadb.PersistentClient(path=CHROMA_PATH)
 COLLECTION_NAME = "skill_knowledge"
+MEMORY_COLLECTION_NAME = "user_memory"
 
-def init_collection():
+# ★ 修复：init_collection 加了 space 校验
+def init_collection(name, metadata=None):
     try:
-        col = client.get_collection(name=COLLECTION_NAME)
+        col = client.get_collection(name=name)
         meta = getattr(col, "metadata", None) or {}
         space = meta.get("hnsw:space", "")
         if space != "cosine":
             print("⚠️" * 20)
-            print(f"⚠️ 检测到向量库使用的是 '{space or 'L2（默认）'}' 距离，不是 cosine。")
+            print(f"⚠️ 集合 {name} 使用的是 '{space or 'L2（默认）'}' 距离，不是 cosine。")
             print("⚠️ 相关度百分比会显示异常。")
             print("⚠️ 请关闭本窗口，删除项目根目录下的 chroma_db 文件夹，再重启。")
             print("⚠️" * 20)
         return col
     except Exception:
-        print("ℹ️ 新建向量库（cosine 距离）")
+        print(f"ℹ️ 新建向量库: {name}")
         return client.create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"}
+            name=name,
+            metadata=metadata or {"hnsw:space": "cosine"}
         )
 
-collection = init_collection()
+collection = init_collection(COLLECTION_NAME, {"hnsw:space": "cosine"})
+memory_collection = init_collection(MEMORY_COLLECTION_NAME, {"hnsw:space": "cosine"})
 
 app = FastAPI(title="RAG 知识库秘书")
 app.add_middleware(
@@ -127,6 +132,13 @@ class ConfigUpdate(BaseModel):
 
 class OpenFolderReq(BaseModel):
     path: str
+
+class EmbedReq(BaseModel):
+    text: str
+
+class MemoryAddReq(BaseModel):
+    content: str
+    source: str = "手动添加"
 
 @app.get("/api/config")
 def get_config():
@@ -146,7 +158,6 @@ def update_config(update: ConfigUpdate):
     except Exception as e:
         print(f"⚠️ 写入 config.json 失败: {e}")
     print(f"🔄 Skill 目录已动态更新为: {BASE_SKILL_DIR}")
-    # ★ 目录变了，重启监听
     restart_watcher()
     return {"status": "success", "skill_dir": new_dir}
 
@@ -229,6 +240,91 @@ def parse_rag_scope(skill_md_path):
     except Exception:
         pass
     return "self"
+
+# ================= 记忆系统接口 =================
+def load_memories():
+    if not os.path.exists(MEMORY_PATH):
+        return []
+    try:
+        with open(MEMORY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def save_memories(memories):
+    with open(MEMORY_PATH, "w", encoding="utf-8") as f:
+        json.dump(memories, f, ensure_ascii=False, indent=2)
+
+@app.get("/api/memory/list")
+def list_memories():
+    memories = load_memories()
+    return {"memories": memories}
+
+# ★ 修复：把 id 也写进 metadata，让检索时能按 id 过滤
+@app.post("/api/memory/add")
+def add_memory(req: MemoryAddReq):
+    memories = load_memories()
+    memory_id = "m" + str(int(time.time() * 1000))
+    emb = get_embedding(req.content)
+    if emb:
+        memory_collection.add(
+            documents=[req.content],
+            embeddings=[emb],
+            metadatas=[{"id": memory_id, "source": req.source, "time": int(time.time() * 1000)}],
+            ids=[memory_id]
+        )
+    memories.append({
+        "id": memory_id,
+        "content": req.content,
+        "source": req.source,
+        "time": int(time.time() * 1000),
+        "enabled": True
+    })
+    save_memories(memories)
+    return {"status": "success", "id": memory_id}
+
+@app.post("/api/memory/delete")
+def delete_memory(req: MemoryAddReq):
+    memories = load_memories()
+    memories = [m for m in memories if m["id"] != req.content]
+    save_memories(memories)
+    try:
+        memory_collection.delete(ids=[req.content])
+    except Exception:
+        pass
+    return {"status": "success"}
+
+# ★ 修复：过滤掉 enabled=false 的记忆
+@app.get("/api/memory/search")
+def search_memory(query: str, top_k: int = 3):
+    if not query:
+        return {"results": []}
+
+    all_memories = load_memories()
+    enabled_ids = {m["id"] for m in all_memories if m.get("enabled", True)}
+    if not enabled_ids:
+        return {"results": []}
+
+    emb = get_embedding(query)
+    if not emb:
+        return {"results": []}
+    try:
+        results = memory_collection.query(
+            query_embeddings=[emb],
+            n_results=top_k,
+            where={"id": {"$in": list(enabled_ids)}}
+        )
+        output = []
+        if results.get('documents') and len(results['documents']) > 0:
+            for i in range(len(results['documents'][0])):
+                output.append({
+                    "content": results['documents'][0][i],
+                    "source": results['metadatas'][0][i].get('source', ''),
+                    "distance": results['distances'][0][i] if 'distances' in results else 0
+                })
+        return {"results": output}
+    except Exception as e:
+        return {"results": [], "error": str(e)}
 
 # ================= 知识库构建 =================
 def run_build_task(trigger="manual"):
@@ -328,7 +424,6 @@ def run_build_task(trigger="manual"):
 
         BUILD_STATUS["progress"] = processed_count
 
-    # 清理已被删除的文件的向量
     try:
         existing_sources = set(new_hashes.keys())
         all_meta = collection.get(include=["metadatas"])
@@ -371,13 +466,12 @@ async def build_knowledge_base(background_tasks: BackgroundTasks):
 def get_build_status():
     return BUILD_STATUS
 
-# ================= ★ 文件监听 =================
+# ================= 文件监听 =================
 _watch_lock = threading.Lock()
 _pending_rebuild = False
 _watch_observer = None
 
 def _schedule_rebuild(reason=""):
-    """防抖触发增量重建。如果正在构建，标记 pending，构建完后自动重跑。"""
     global _pending_rebuild
     with _watch_lock:
         if BUILD_STATUS["status"] == "running":
@@ -403,11 +497,10 @@ if WATCHDOG_AVAILABLE:
         def __init__(self):
             self._timer = None
             self._lock = threading.Lock()
-            # 忽略临时文件 / 编辑器缓存 / 我们自己的产物
             self._ignore = re.compile(
                 r'(~$|\.tmp$|\.swp$|\.swx$|\.bak$|\.crdownload$|\.part$|'
                 r'\\chroma_db\\|\\__pycache__\\|\.DS_Store$|Thumbs\.db$|'
-                r'file_hashes\.json$|conversations\.json$)',
+                r'file_hashes\.json$|conversations\.json$|memory\.json$)',
                 re.IGNORECASE
             )
 
@@ -424,7 +517,6 @@ if WATCHDOG_AVAILABLE:
             path = event.src_path
             if self._should_ignore(path):
                 return
-            # 防抖：2 秒内的连续事件合并为一次
             with self._lock:
                 if self._timer:
                     self._timer.cancel()
@@ -603,12 +695,46 @@ def open_folder(req: OpenFolderReq):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ================= 临时 RAG 接口 =================
+@app.post("/api/embed")
+def api_embed(req: EmbedReq):
+    emb = get_embedding(req.text)
+    if emb is None:
+        raise HTTPException(status_code=500, detail="向量服务不可用")
+    return {"embedding": emb}
+
+@app.post("/api/parse_temp_file")
+async def parse_temp_file(file: UploadFile = File(...)):
+    import tempfile
+    try:
+        ext = os.path.splitext(file.filename)[1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        text = read_file_content(tmp_path)
+        os.unlink(tmp_path)
+
+        if not text or not text.strip():
+            print(f"⚠️ 临时文件 {file.filename} 内容为空")
+            return {"filename": file.filename, "chunks": [], "error": "文件内容为空"}
+
+        chunks = split_text(text)
+        result = []
+        for i, chunk in enumerate(chunks):
+            result.append({"text": chunk, "embedding": []})
+
+        print(f"✅ 已解析临时文件 {file.filename}，共 {len(result)} 个片段")
+        return {"filename": file.filename, "chunks": result}
+    except Exception as e:
+        print(f"⚠️ 解析临时文件失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ================= 启动 =================
 @app.on_event("startup")
 def on_startup():
-    # 启动文件监听
     start_watcher()
-    # 启动后延迟扫一次，把上次没建完的补齐
     def initial_scan():
         time.sleep(2.0)
         print("🔍 启动时扫描知识库...")
@@ -626,9 +752,10 @@ if __name__ == "__main__":
     print(f"📂 Skill 目录: {BASE_SKILL_DIR}")
     print(f"📂 向量模型: {EMBED_MODEL} @ {OLLAMA_URL}")
     try:
-        print(f"📂 向量库现有: {collection.count()} 个片段")
+        print(f"📂 知识库现有: {collection.count()} 个片段")
+        print(f"📂 记忆库现有: {memory_collection.count()} 条记忆")
     except Exception:
-        print(f"📂 向量库现有: 0 个片段")
+        print(f"📂 知识库/记忆库现有: 0 个片段")
     if not os.path.exists(BASE_SKILL_DIR):
         print(f"⚠️ 警告：Skill 目录不存在！请修改 config.json 里的 skill_dir")
     print(f"👀 文件监听: {'已启用' if WATCHDOG_AVAILABLE else '未安装 watchdog（pip install watchdog）'}")

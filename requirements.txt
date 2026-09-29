@@ -5,3 +5,4 @@ pypdf
 python-docx
 requests
 watchdog
+python-multipart

@@ -1,27 +1,35 @@
 # 狸猫AI工具盒 (Limaodawang AI Toolbox)
 
-> 一个基于 Ollama 的本地大模型聊天客户端，支持 **动态 Skill 加载**、**RAG 知识库检索**、**多 Skill 组合**、**对话分支** 与 **文件自动监听**。
+> 一个基于 Ollama 的本地大模型聊天客户端，支持 **多平台 API 接入**、**动态 Skill 加载**、**RAG 知识库检索**、**临时 RAG（拖拽文件）**、**长期记忆系统**、**多 Skill 组合** 与 **对话分支**。
 > 前后端分离：模块化前端（原生 JS 多文件）+ 后端 Python (FastAPI + ChromaDB)。
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black.svg)
-![Version](https://img.shields.io/badge/Version-1.21-green.svg)
+![Version](https://img.shields.io/badge/Version-1.22-green.svg)
 
 ---
 
 ## ✨ 特性
 
-### 1.21 版本核心更新
+### 1.22 版本核心更新（重磅升级）
 
-- 👀 **文件自动监听** —— 后端启动后自动盯着 `skill_dir`，改文件后 2 秒内自动增量重建向量库，**不再需要手动点"重建知识库"**
+- 🔌 **多平台 API 接入** —— 打破只能用 Ollama 的限制，现支持任何 OpenAI 兼容接口（DeepSeek、Moonshot、SiliconFlow、OpenRouter 等），顶栏模型选择按平台分组展示，支持跨平台对比
+- 🧠 **长期记忆系统** —— AI 自动从对话中提取你的偏好和事实，存入 `memory.json` 和独立向量库，下次对话按相关度自动注入，真正做到“记住你”
+- 📎 **临时 RAG（拖拽文件）** —— 拖拽文件到输入框或点击回形针上传，文本文件（.md/.txt/.py/.html/.json 等）由前端直接读取，PDF/Word 走后端解析，**不落库、不污染主知识库**，仅本次对话生效
+- 📡 **平台连通性检测** —— 设置面板新增“平台管理”，可添加/编辑/删除平台，并一键测试连接
+- 📊 **真实 Token 统计** —— 接入外部 API 后，消息头显示真实的 prompt / completion token 用量
+
+### 1.21 版本功能
+
+- 👀 **文件自动监听** —— 后端启动后自动盯着 `skill_dir`，改文件后 2 秒内自动增量重建向量库
 - 🧩 **多 Skill 叠加** —— 下拉框多选，system prompt 按顺序拼接，颜文字库自动合并
-- 🔍 **Skill 命名空间隔离** —— 每个 Skill 的知识库独立检索，问"狸猫测试官"不会再混入别的 Skill 的文档
-- 🎯 **相关度百分比** —— RAG 引用改用 cosine 距离，显示 0~100% 相关度标签（绿/橙/红三档）
+- 🔍 **Skill 命名空间隔离** —— 每个 Skill 的知识库独立检索，避免跨 Skill 文档污染
+- 🎯 **相关度百分比** —— RAG 引用改用 cosine 距离，显示 0~100% 相关度标签
 - 📂 **引用可交互** —— 每条引用支持展开全文、复制、一键打开所在目录
-- 🌿 **消息分支树** —— 任意 AI 回答可"分叉"，顶栏显示面包屑，侧栏显示层级缩进
+- 🌿 **消息分支树** —— 任意 AI 回答可“分叉”，顶栏显示面包屑，侧栏显示层级缩进
 - 🌡️ **三级参数继承** —— 全局 → 预设 → 会话，每个对话独立配置 temperature/num_ctx 等
-- 📝 **模板变量** —— 提示词模板支持 `{{date}}`、`{{clipboard}}`、`{{selected}}` 等变量，同时支持中文写法 `{{日期}}`
+- 📝 **模板变量** —— 提示词模板支持 `{{date}}`、`{{clipboard}}`、`{{selected}}` 等变量
 
 ### 1.20 版本功能
 
@@ -29,12 +37,7 @@
 - 🧩 **Skill 加载追溯** —— 每条 AI 回答记录 Skill 来源，导出时带上
 - 🚀 **一键启动器** —— `启动狸猫AI工具盒.bat` 自动检测环境并拉起前后端
 
-### 1.19 版本功能
-
-- ⚡ **知识库一键重建 + 增量更新** —— 只处理变动文件
-- 📚 **RAG 溯源 UI** —— 回答下方可展开查看引用来源
-
-### 1.18 版本首发功能
+### 1.18 ~ 1.19 首发功能
 
 - 🧩 **动态 Skill 加载** —— 把 `SKILL.md` 放进 `skills/` 目录，下拉框选中即生效
 - 🎭 **Skill 专属颜文字** —— 每个 Skill 配 `emoji_config.json`，`[emo:xxx]` 自动替换
@@ -45,6 +48,7 @@
 - 🎤 **语音输入 / 朗读** —— 基于 Web Speech API
 - 🎨 **主题 / 字号 / 主题色** 自定义
 - 💾 **多格式导出** —— JSON / Markdown / TXT / 单条回答 / 全量备份
+- 📚 **RAG 知识库检索** —— 一键重建 + 增量更新（按文件 MD5 判断）
 - 🖥️ **纯本地运行** —— 无云端、无遥测、无账号
 
 ---
@@ -57,16 +61,17 @@
 │  - 聊天 UI / 流式渲染    │◄───────►│   /api/chat  对话         │
 │  - Skill 单选 / 多选     │         │   /api/tags  模型列表      │
 │  - RAG 开关 / 引用展示   │         │   /api/embeddings 向量     │
-└───────────┬─────────────┘         └──────────────────────────┘
+│  - 拖拽文件 / 点击上传   │         └──────────────────────────┘
+└───────────┬─────────────┘
             │
             │ 加载 js/*.js 模块 + css/*.css
             ▼
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │  js/ 模块化前端         │         │  ChromaDB (cosine 距离)   │
 │  - state/config/utils   │         │  - skill_knowledge 集合   │
-│  - storage/session      │         │  - 按 skill_id 隔离检索   │
-│  - markdown/api         │         └──────────────────────────┘
-│  - ui/ + features/      │
+│  - storage/session      │         │  - user_memory 集合       │
+│  - markdown/api         │         │  - 按 skill_id 隔离检索   │
+│  - ui/ + features/      │         └──────────────────────────┘
 │  - main.js (入口)       │
 └───────────┬─────────────┘
             │ HTTP
@@ -77,17 +82,22 @@
 │  - /api/skill_content   │         └──────────────────────────┘
 │  - /api/search  (RAG)   │
 │  - /api/build   (建库)   │         ┌──────────────────────────┐
-│  - /api/open_folder     │◄───────►│  watchdog 文件监听线程    │
-└─────────────────────────┘         └──────────────────────────┘
+│  - /api/memory/* (记忆)  │◄───────►│  memory.json (长期记忆)   │
+│  - /api/parse_temp_file │         └──────────────────────────┘
+│  - /api/open_folder     │
+│  - /api/embed           │         ┌──────────────────────────┐
+└─────────────────────────┘◄───────►│  watchdog 文件监听线程    │
+                                    └──────────────────────────┘
 ```
 
-**工作流程**：
+**工作流程：**
 
 1. 浏览器加载 `index.html`，按顺序引入 `js/` 下 15 个模块
-2. `main.js` 的 `init()` 启动 → 拉取 Skill 列表 → 恢复上次选择的 Skill
-3. 用户发消息（开启 RAG）→ 按当前 Skill 命名空间检索 → 拼接 system prompt → 发给 Ollama
-4. Ollama 流式返回 → 前端渲染（Markdown / 代码高亮 / KaTeX / 颜文字替换）
-5. 后端 watchdog 盯着 `skill_dir`，有文件变化 → 2 秒后自动增量重建
+2. `main.js` 的 `init()` 启动 → 拉取 Skill 列表 → 恢复上次选择的 Skill → 绑定拖拽上传
+3. 用户发消息 → 按当前 Skill 命名空间检索 → 拼接 system prompt → 发给所选平台的模型
+4. AI 流式返回 → 前端渲染（Markdown / 代码高亮 / KaTeX / 颜文字替换）
+5. 回答完毕后，后台静默从对话中提取记忆并存入 `memory.json` 和向量库
+6. 后端 watchdog 盯着 `skill_dir`，有文件变化 → 2 秒后自动增量重建
 
 ---
 
@@ -127,6 +137,8 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 ```
+
+> ⚠️ **1.22 新增依赖**：`python-multipart`（用于接收前端上传的临时文件）。如果你的 `requirements.txt` 里还没有它，请手动加上。
 
 ### 4. 配置
 
@@ -190,7 +202,8 @@ python -m http.server 5500
 📂 配置文件: ...\config.json
 📂 Skill 目录: E:/skills
 📂 向量模型: nomic-embed-text @ http://127.0.0.1:11434
-📂 向量库现有: 657 个片段
+📂 知识库现有: 658 个片段
+📂 记忆库现有: 0 条记忆
 👀 文件监听: 已启用
 👀 已启动文件监听：E:/skills
 INFO:     Uvicorn running on http://127.0.0.1:8000
@@ -200,29 +213,61 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 
 ### 6. 建立知识库（首次使用必须做）
 
-把要检索的文档放进 `skill_dir` 目录，**在前端界面点击「⚙ 设置」→「🔄 重建知识库」**即可。
+把要检索的文档放进 `skill_dir` 目录，**在前端界面点击「⚙ 设置」→「🔄 重建知识库」** 即可。
 
 **之后修改任何文档，watchdog 会自动检测并增量更新，无需再手动点按钮。**
 
+### 7. 配置多平台（可选）
+
+1. 打开「⚙ 设置」→「平台管理」
+2. 点击「＋ 新增平台」
+3. 填写：
+   - 名称：`DeepSeek`
+   - API 地址：`https://api.deepseek.com`
+   - 类型：`openai`
+   - API Key：你的 DeepSeek 密钥
+4. 点击「测试连接」，确认连通
+5. 关闭设置，顶栏模型下拉框会按平台分组展示所有模型
+
 ---
 
-## 👀 文件自动监听
+## 🧠 长期记忆系统
 
-1.21 起，后端使用 `watchdog` 库监听 `skill_dir`：
+### 如何使用
 
-- **启动时**：自动扫描一次，有变化则增量重建
-- **运行中**：任何文件被增 / 删 / 改，**2 秒后**自动触发增量重建
-- **构建中又来变化**：排队，构建完自动再跑一轮
-- **已删除的文件**：向量库中对应的片段会自动清理
+- **自动提取**：每次 AI 回答完毕后，后台会静默分析最近对话，自动提取关于你的关键信息（姓名、喜好、习惯等），存入 `memory.json` 和向量库
+- **手动添加**：设置面板 →「🧠 长期记忆」→ 输入内容 →「＋ 添加」
+- **自动注入**：下次对话时，系统按相关度检索记忆并注入上下文，AI 回答底部会显示 `🧠 记忆` 引用
+- **开关控制**：设置面板顶部可勾选「启用记忆注入」，关闭后不再注入
 
-前端顶栏会实时显示：
+### 记忆存储位置
 
-```
-📂 检测到文件变化，正在自动更新知识库...
-✅ 知识库已自动更新
-```
+- `memory.json`：记忆的元数据（内容、来源、时间、启用状态）
+- `chroma_db/` 中的 `user_memory` 集合：记忆的向量表示，用于相似度检索
 
-**不需要手动点"重建知识库"了**。当然手动按钮仍然保留，用于强制全量扫描。
+---
+
+## 📎 临时 RAG（拖拽文件）
+
+### 如何使用
+
+- **拖拽上传**：将文件拖到页面任意位置，出现全屏提示后松开，文件会变成输入框上方的 Chip 标签
+- **点击上传**：点击输入框右侧的 📎 回形针按钮，选择文件
+- **移除文件**：点击 Chip 上的 `×` 可移除单个临时文件
+
+### 支持格式
+
+| 文件类型 | 处理方式 | 说明 |
+|---|---|---|
+| `.md` `.txt` `.py` `.html` `.css` `.js` `.json` `.csv` `.xml` `.yaml` | 前端直接读取 | 浏览器原生 `file.text()` 读取，100% 兼容 |
+| `.pdf` `.docx` | 后端解析 | 调用 `pypdf` / `python-docx` 提取文本 |
+
+### 工作原理
+
+临时文件**不会写入 ChromaDB 主知识库**，而是：
+1. 文本文件由前端直接读取并切片
+2. 发送消息时，将文件内容**全文注入**到 system prompt 中
+3. 对话结束或刷新页面后自动清空
 
 ---
 
@@ -236,15 +281,15 @@ js/
 ├── storage.js            # 草稿 + IndexedDB + 文件夹同步
 ├── session.js            # 会话增删改查、搜索、分支面包屑
 ├── markdown.js           # Markdown 渲染、思考分离、颜文字替换
-├── api.js                # Ollama 请求 + RAG 检索 + 打开目录
+├── api.js                # 多平台请求 + RAG 检索 + 临时文件 + 记忆接口
 ├── main.js               # 应用入口 init() + Skill 组合 + 构建轮询
 ├── ui/
 │   ├── sidebar.js        # 侧栏会话列表（含分支缩进）
-│   ├── input.js          # 输入框、快捷模板、语音、快捷键
-│   ├── settings.js       # 设置面板、预设、模板、颜文字、会话参数
+│   ├── input.js          # 输入框、快捷模板、语音、拖拽上传
+│   ├── settings.js       # 设置面板、预设、模板、颜文字、平台管理、记忆管理
 │   └── messages.js       # 消息渲染、RAG 引用卡片、消息导航、朗读
 └── features/
-    ├── chat.js           # 对话核心（发送 / 重发 / 续写 / 分叉）
+    ├── chat.js           # 对话核心（发送 / 重发 / 续写 / 分叉 / 记忆提取）
     ├── compress.js       # 上下文压缩
     └── export.js         # 导出 MD/TXT/JSON、备份恢复
 ```
@@ -310,20 +355,6 @@ rag_scope: self
 
 模型输出 `[emo:nod]` 时前端自动替换成 `( ˘•ω•˘ )`。
 
-- 没加载 Skill 时，`[emo:xxx]` 原样显示
-- **多 Skill 组合时，多个 emoji 库会合并**（后加载覆盖同名）
-
----
-
-## 🧩 多 Skill 组合
-
-顶栏 Skill 下拉框选 **「⚙ 多 Skill 组合...」**，弹出面板：
-
-- 勾选多个 Skill → system prompt 按列表顺序用 `===== 【技能名】 =====` 分隔拼接
-- 多个 emoji 库合并
-- **多 Skill 模式下 RAG 自动使用全库检索**（避免跨 Skill 分库的复杂度）
-- 底部实时显示总字数，超 6000 警告 / 超 12000 弹出提醒
-
 ---
 
 ## 📖 API 接口
@@ -341,6 +372,12 @@ rag_scope: self
 | `GET`  | `/api/build_status` | 获取构建进度和触发来源 |
 | `GET`  | `/api/search?query=xxx&top_k=3&skill_id=xxx&scope=self` | RAG 检索（支持命名空间隔离） |
 | `POST` | `/api/open_folder` | 在文件管理器中打开并选中文件 |
+| `POST` | `/api/embed` | 获取文本向量（用于临时 RAG） |
+| `POST` | `/api/parse_temp_file` | 解析上传的临时文件（PDF/Word 走后端） |
+| `GET`  | `/api/memory/list` | 获取所有长期记忆 |
+| `POST` | `/api/memory/add` | 添加一条记忆 |
+| `POST` | `/api/memory/delete` | 删除一条记忆 |
+| `GET`  | `/api/memory/search?query=xxx&top_k=3` | 检索记忆 |
 
 交互式文档：启动后访问 <http://127.0.0.1:8000/docs>。
 
@@ -352,35 +389,17 @@ rag_scope: self
 
 | 项目 | 说明 |
 |---|---|
-| Ollama 地址 | 默认 `http://127.0.0.1:11434` |
-| RAG 后端地址 | 默认 `http://127.0.0.1:8000` |
+| 平台管理 | 添加/编辑/删除 Ollama、DeepSeek 等平台，支持一键测试连接 |
 | 知识库管理 | 一键重建向量库（增量），带实时进度 |
 | Skill 目录 | 动态修改并热重载，同时重启文件监听 |
 | 并发对比开关 | 根据显卡性能选择双模型对比模式 |
 | 存储目录 | 绑定本地文件夹，会话自动同步到 `conversations.json` |
+| 长期记忆 | 启用/禁用记忆注入，查看/添加/删除记忆 |
 | 系统提示词 | 未加载 Skill 时生效 |
 | Temperature / Top P / num_ctx / num_predict | 全局参数（可被预设或会话覆盖） |
 | 字体大小 / 主题色 | 界面外观 |
 | 提示词模板 | 输入框上方的快捷按钮，支持 `{{date}}` 等变量 |
 | 角色预设 | 本地保存的系统提示词预设，可附带参数覆盖 |
-
-### 🌡️ 会话级参数（顶栏 🌡️ 按钮）
-
-三级继承，优先级：**会话 > 预设 > 全局**。勾选就覆盖，不勾选就继承。
-
----
-
-## 📝 模板变量
-
-提示词模板里可以使用以下变量，点击变量 chip 可插入到最后聚焦的输入框：
-
-| 英文写法 | 中文写法 | 说明 |
-|---|---|---|
-| `{{date}}` | `{{日期}}` | 当前日期，如 `2026-09-28` |
-| `{{time}}` | `{{时间}}` | 当前时间，如 `15:30` |
-| `{{session_title}}` | `{{会话标题}}` / `{{标题}}` | 当前会话标题 |
-| `{{selected}}` | `{{选中}}` / `{{选中文本}}` | 页面上选中的文本 |
-| `{{clipboard}}` | `{{剪贴板}}` | 当前剪贴板内容 |
 
 ---
 
@@ -406,15 +425,16 @@ rag_scope: self
 │   ├── base.css               # 变量、reset、主题
 │   ├── layout.css             # 侧栏、顶栏、面包屑
 │   ├── chat.css               # 消息、思考框、代码块、RAG 引用卡片
-│   ├── input.css              # 输入区、快捷模板、语音
+│   ├── input.css              # 输入区、快捷模板、语音、拖拽上传
 │   └── modal.css              # 弹窗、设置、Skill 组合、参数面板
 ├── js/                        # 15 个前端模块
-├── rag_server.py              # 后端 RAG 服务（含 watchdog）
+├── rag_server.py              # 后端 RAG 服务（含 watchdog + 记忆系统）
 ├── 一键启动狸猫ai工具盒.bat     # 一键启动
 ├── 启动RAG秘书.bat             # 只启动后端
 ├── requirements.txt
 ├── config.example.json        # 配置模板
 ├── config.json                # 本地配置（.gitignore）
+├── memory.json                # 长期记忆数据（.gitignore）
 ├── LICENSE
 ├── README.md
 ├── docs/
@@ -433,6 +453,7 @@ rag_scope: self
 1. 确认 Ollama 已启动：浏览器访问 <http://127.0.0.1:11434/api/tags> 是否返回 JSON
 2. 确认至少拉了一个模型：`ollama list`
 3. 检查设置里的「Ollama 地址」是否正确
+4. 如果接入了外部平台，检查 API Key 是否有效（可点「测试连接」验证）
 </details>
 
 <details>
@@ -452,12 +473,30 @@ rag_scope: self
 </details>
 
 <details>
-<summary><b>改了文件但没自动更新</b></summary>
+<summary><b>拖拽文件没反应 / 浏览器直接打开了文件</b></summary>
 
-1. 确认后端黑框显示 `👀 文件监听: 已启用`
-2. 确认 `pip install watchdog` 成功
-3. 保存后**等 3 秒**（防抖 2 秒 + 处理时间）
-4. 如果还在构建中改了文件，会排队等当前构建完成
+1. 确认 `js/ui/input.js` 中的 `bindDragAndDrop()` 函数存在，且 `js/main.js` 的 `init()` 中调用了 `bindDragAndDrop();`
+2. 按 `Ctrl + F5` 强制刷新页面（清除浏览器旧缓存）
+3. 拖拽时请拖到**输入框区域**，不要拖到浏览器标签页上
+</details>
+
+<details>
+<summary><b>临时文件拖进去但 AI 读不到内容</b></summary>
+
+1. 确认文件大小不超过 5MB
+2. 文本文件（.md/.txt/.py/.html/.json 等）由前端直接读取，如果编码不是 UTF-8，可能显示乱码
+3. 查看浏览器 F12 控制台是否有报错
+4. 临时文件内容超过 3000 字会被截断，这是正常的（防止爆 token）
+</details>
+
+<details>
+<summary><b>记忆功能不生效</b></summary>
+
+1. 确认设置面板中「启用记忆注入」已勾选
+2. 确认后端 `rag_server.py` 已重启，黑框中显示 `📂 记忆库现有: xxx 条记忆`
+3. 打开设置面板 →「🧠 长期记忆」，查看是否有记忆条目
+4. 如果记忆库为空，先手动添加一条测试
+5. 确认 `python-multipart` 已安装（`pip list` 查看）
 </details>
 
 <details>
@@ -473,7 +512,6 @@ rag_scope: self
 - 检查 Skill 目录里是否有 `emoji_config.json`，且和 `SKILL.md` 同级
 - 确认前端已经选择了那个 Skill
 - **多 Skill 组合时**，emoji 库是合并的，同名的以后加载的为准
-- 如果模型输出了不存在的标签（如 `[emo:sunny]`），会原样显示。建议在 `SKILL.md` 里约束模型"只能使用列出的标签"
 </details>
 
 <details>
@@ -482,16 +520,6 @@ rag_scope: self
 - **1.20 起前端已模块化拆分，必须走 HTTP**，不能用 `file://` 双击打开
 - 用 `python -m http.server 5500` 起静态服务器
 - 或直接双击 `一键启动狸猫ai工具盒.bat`
-</details>
-
-<details>
-<summary><b>7B 模型回答混乱 / 不遵守人设</b></summary>
-
-这是**模型能力问题**。7B 在"保持人设 + 复杂指令 + 安全约束"三重冲突下容易崩溃。建议：
-
-- 换 14B 及以上模型（如 `qwen2.5:14b`）
-- 精简 Skill 的约束条目
-- 把冲突约束拆到 RAG 分阶段注入
 </details>
 
 <details>
@@ -506,6 +534,7 @@ rag_scope: self
 
 - 本项目**仅监听 `127.0.0.1`**，默认不对外暴露。
 - 后端接口**无鉴权**，请勿将 `host` 改为 `0.0.0.0` 后部署到公网。
+- API Key 明文存储在 `localStorage` 中，请勿在公共电脑上保存敏感密钥。
 - 如确有远程使用需求，请自行加 HTTPS + Token 鉴权 + 反向代理。
 
 ---
@@ -525,18 +554,20 @@ rag_scope: self
 - [x] Skill 命名空间隔离（1.21）
 - [x] 多 Skill 叠加（1.21）
 - [x] 文件自动监听（1.21）
+- [x] 多平台 API 接入（1.22）
+- [x] 平台连通性检测（1.22）
+- [x] 真实 Token 统计（1.22）
+- [x] 临时 RAG（拖拽文件）（1.22）
+- [x] 长期记忆系统（1.22）
 
 ### 未来计划
 
-- [ ] 多平台 API 接入（DeepSeek / Moonshot / SiliconFlow 等）
-- [ ] 拖拽文件到输入框（临时 RAG，不落库）
-- [ ] 平台连通性检测
-- [ ] 真实 token 用量显示
 - [ ] 工具调用 / MCP 支持
-- [ ] 视觉模型输入
+- [ ] 视觉模型输入（拖拽图片）
 - [ ] 从 ChatGPT / Claude 导入历史
 - [ ] 数据加密
 - [ ] 成本统计
+- [ ] 插件市场
 
 ---
 

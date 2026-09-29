@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>狸猫AI工具盒  v1.21 </title>
+<title>狸猫AI工具盒 v1.22</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" id="hljs-dark">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" id="hljs-light" disabled>
@@ -14,6 +14,12 @@
 <link rel="stylesheet" href="css/modal.css">
 </head>
 <body>
+
+<div id="globalDropOverlay" class="global-drop-overlay">
+  <div style="font-size: 48px; margin-bottom: 16px;">📥</div>
+  <div style="font-size: 18px; font-weight: 500;">松开鼠标，将文件作为临时知识库</div>
+  <div style="font-size: 13px; opacity: 0.7; margin-top: 8px;">仅本次对话生效，不会污染本地知识库</div>
+</div>
 
 <aside id="sidebar">
   <div class="side-head">
@@ -57,13 +63,16 @@
   <div class="nav-tip" id="navTip"></div>
   <button id="jumpBtn" title="回到底部">↓</button>
   <div class="input-area">
-    <div class="input-inner">
+    <div class="input-inner" id="inputInner">
+      <div id="tempFileChips" class="temp-file-chips"></div>
       <div class="quote-preview" id="quotePreview"></div>
       <div class="quick-prompts" id="quickPrompts"></div>
       <textarea id="input" rows="1" placeholder="发消息…（Enter 发送，Shift+Enter 换行）"></textarea>
       <div class="input-foot">
         <span class="hint">Enter 发送 · Ctrl+N 新对话 · Ctrl+K 清空输入 · Esc 停止</span>
         <span class="spacer"></span>
+        <input type="file" id="fileInput" multiple accept=".md,.txt,.pdf,.docx,.py,.json,.csv,.html,.css,.js" style="display: none;">
+        <button id="fileUploadBtn" title="点击选择文件上传" style="background:transparent; border:1px solid var(--border); color:var(--text); font-size:16px;">📎</button>
         <button id="micBtn" title="点击开始/停止语音输入">🎤</button>
         <button id="sendBtn">发送</button>
       </div>
@@ -74,7 +83,6 @@
 <div class="modal-mask" id="settingsMask">
   <div class="modal">
     <h2>设置</h2>
-    <div class="field"><label>Ollama 地址</label><input type="text" id="cfgUrl"></div>
     <div class="field"><label>RAG 后端地址（Python 秘书）</label><input type="text" id="cfgRagUrl"></div>
     
     <div class="field">
@@ -114,6 +122,30 @@
         <button id="pickFolderBtn" style="padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;white-space:nowrap">选择文件夹</button>
       </div>
     </div>
+
+    <div class="field">
+      <label>平台管理（多模型接入）</label>
+      <div id="providerList" style="display:flex; flex-direction:column; gap:8px; margin-top:6px;"></div>
+      <button id="addProviderBtn" style="margin-top:8px; padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; font-size:13px; font-family:inherit;">＋ 新增平台</button>
+    </div>
+
+    <div class="field">
+      <label style="display:flex; justify-content:space-between; align-items:center;">
+        <span>🧠 长期记忆（跨会话记忆）</span>
+        <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:normal; cursor:pointer;">
+          <input type="checkbox" id="cfgMemoryEnabled"> 启用记忆注入
+        </label>
+      </label>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; line-height:1.6;">
+        让 AI 记住你的偏好和事实。每次对话会自动检索最相关的记忆并注入上下文。
+      </div>
+      <div id="memoryList" style="max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:6px; margin-bottom:8px; background:var(--bg-side);"></div>
+      <div style="display:flex; gap:6px;">
+        <input type="text" id="newMemoryInput" placeholder="手动输入一条记忆，例如：'我叫张三'" style="flex:1; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input); color:var(--text); font-family:inherit; font-size:13px; outline:none;">
+        <button id="addMemoryBtn" style="padding:6px 12px; border-radius:6px; border:none; background:var(--accent); color:#fff; cursor:pointer; font-size:13px; font-family:inherit;">＋ 添加</button>
+      </div>
+    </div>
+
     <div class="field"><label>系统提示词（无Skill时生效）</label><textarea id="cfgSys"></textarea></div>
     <div class="field"><label>Temperature：<span id="tempVal">0.7</span></label><input type="range" id="cfgTemp" min="0" max="2" step="0.1"></div>
     <div class="field"><label>Top P：<span id="toppVal">0.9</span></label><input type="range" id="cfgTopP" min="0" max="1" step="0.05"></div>

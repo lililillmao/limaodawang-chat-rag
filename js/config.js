@@ -1,8 +1,15 @@
 // ============ 全局配置 ============
-// 默认配置 + 持久化 + 主题/外观应用
 
 const DEFAULT_CFG = {
-  url: "http://127.0.0.1:11434",
+  providers: [
+    {
+      id: "ollama",
+      type: "ollama",
+      name: "本地 Ollama",
+      baseUrl: "http://127.0.0.1:11434",
+      apiKey: ""
+    }
+  ],
   ragUrl: "http://127.0.0.1:8000",
   dir: "",
   system: "",
@@ -20,7 +27,11 @@ const DEFAULT_CFG = {
   quickPrompts: ["翻译", "总结", "改代码"],
   emoMap: {},
   ragEnabled: false,
-  compareConcurrent: false
+  compareConcurrent: false,
+  // ★ 长期记忆配置
+  memoryEnabled: true, // 默认开启记忆
+  memoryRounds: 3,    // 检索时注入最相关的前 N 条记忆
+  memoryExtract: true // 自动从对话提取记忆
 };
 
 let cfg = { ...DEFAULT_CFG };
@@ -36,6 +47,11 @@ function getRagUrl() {
   return (cfg.ragUrl || DEFAULT_CFG.ragUrl).replace(/\/$/, "");
 }
 
+function getCurrentProvider() {
+  const providerId = cfg.modelProviderId || currentProviderId || "ollama";
+  return cfg.providers.find(p => p.id === providerId) || cfg.providers[0];
+}
+
 function loadLocal() {
   try { Object.assign(cfg, JSON.parse(localStorage.getItem(LS.cfg) || "{}")); } catch (e) {}
   try { sessions = JSON.parse(localStorage.getItem(LS.sessions) || "[]"); } catch (e) { sessions = []; }
@@ -48,6 +64,20 @@ function loadLocal() {
   if (!cfg.emoMap || typeof cfg.emoMap !== "object" || Array.isArray(cfg.emoMap)) cfg.emoMap = {};
   if (!cfg.ragUrl) cfg.ragUrl = DEFAULT_CFG.ragUrl;
   if (!cfg.num_predict) cfg.num_predict = 1024;
+  
+  // 兼容旧版配置：如果没有 providers，则根据旧版 url 生成一个
+  if (!cfg.providers || !Array.isArray(cfg.providers) || cfg.providers.length === 0) {
+    cfg.providers = [
+      {
+        id: "ollama",
+        type: "ollama",
+        name: "本地 Ollama",
+        baseUrl: cfg.url || "http://127.0.0.1:11434",
+        apiKey: ""
+      }
+    ];
+  }
+  delete cfg.url; 
 }
 
 function saveLocal() {
@@ -82,8 +112,6 @@ function applyTheme() {
 }
 
 // ============ 参数三级继承 ============
-// 全局 cfg → 预设 params → 会话 params
-
 const PARAM_KEYS = ["temperature", "top_p", "num_ctx", "num_predict"];
 
 function hasValue(v) {

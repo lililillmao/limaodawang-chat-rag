@@ -1,5 +1,4 @@
 // ============ 全局状态变量 ============
-// 集中管理所有运行时状态，各模块共享
 
 // 颜文字相关（Skill 加载时会被替换）
 let dynamicEmo = {};
@@ -31,7 +30,7 @@ let navTicks = [];
 let navObserver = null;
 
 // 模型列表缓存
-let allModelsCache = [];
+let allModelsCache = []; 
 
 // 预设编辑临时 ID
 let editingPresetId = null;
@@ -54,3 +53,14 @@ let editingSessionParams = null;
 // 模板变量：缓存最后一次非空选区
 let cachedSelection = "";
 let lastTplInputIdx = -1;
+
+// ★ 多平台相关状态
+let currentProviderId = "ollama";
+let editingProviderId = null;
+
+// ★ 临时 RAG 文件
+let tempRagFiles = [];
+
+// ★ 长期记忆系统相关状态
+let memories = []; // 记忆列表
+let memoryEnabled = false; // 是否启用记忆注入
