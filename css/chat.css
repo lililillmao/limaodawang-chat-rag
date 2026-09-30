@@ -9,6 +9,9 @@
 .msg-body{flex:1;min-width:0;overflow:hidden}
 .msg-role{font-size:13px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .msg-tokens{font-size:11px;color:var(--text-dim);opacity:.7}
+/* ★ 16：顶栏"当前启用预设"徽章 */
+.preset-badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:6px;background:rgba(16,163,127,.12);color:#10a37f;font-size:11px;font-weight:500;border:1px solid rgba(16,163,127,.28);white-space:nowrap;cursor:pointer;max-width:170px;overflow:hidden;text-overflow:ellipsis;transition:all .15s}
+.preset-badge:hover{background:rgba(16,163,127,.2);border-color:#10a37f}
 .msg-time{font-size:11px;color:var(--text-dim);opacity:.6;margin-left:auto}
 .msg-content{word-wrap:break-word;overflow-wrap:anywhere;font-size:var(--font-size)}
 .msg-content p{margin:0 0 10px}

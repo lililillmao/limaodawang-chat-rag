@@ -35,7 +35,13 @@ function openSettings() {
   // ★ 新增：渲染记忆管理
   document.getElementById("cfgMemoryEnabled").checked = cfg.memoryEnabled || false;
   fetchMemories().then(() => renderMemoryList());
-  
+
+  // ★ 1.23：视觉输入与工具调用
+  document.getElementById("cfgVisionEnabled").checked = cfg.visionEnabled !== false;
+  document.getElementById("cfgImageMaxEdge").value = cfg.imageMaxEdge || 1568;
+  document.getElementById("cfgToolsEnabled").checked = !!cfg.toolsEnabled;
+  document.getElementById("cfgMaxToolRounds").value = cfg.maxToolRounds || 5;
+
   document.getElementById("settingsMask").classList.add("show");
 }
 
@@ -53,10 +59,24 @@ function saveSettings() {
   cfg.fontSize = parseInt(document.getElementById("cfgFontSize").value) || 15;
   cfg.accent = document.getElementById("cfgAccent").value || "";
   cfg.memoryEnabled = document.getElementById("cfgMemoryEnabled").checked; // ★ 保存记忆开关
-  
+
+  // ★ 1.23：视觉输入与工具调用
+  cfg.visionEnabled = document.getElementById("cfgVisionEnabled").checked;
+  const edge = parseInt(document.getElementById("cfgImageMaxEdge").value, 10);
+  cfg.imageMaxEdge = (Number.isFinite(edge) && edge >= 256 && edge <= 4096) ? edge : 1568;
+  const prevTools = !!cfg.toolsEnabled;
+  cfg.toolsEnabled = document.getElementById("cfgToolsEnabled").checked;
+  const rounds = parseInt(document.getElementById("cfgMaxToolRounds").value, 10);
+  cfg.maxToolRounds = (Number.isFinite(rounds) && rounds >= 1 && rounds <= 20) ? rounds : 5;
+
   saveLocal();
   applyFontSize();
   applyAccentColor();
+  // ★ 1.23：工具开关可能被改动，同步顶栏徽章
+  if (typeof updateToolsBadge === "function") updateToolsBadge();
+  if (prevTools !== cfg.toolsEnabled) {
+    setStatus(cfg.toolsEnabled ? "🔧 工具调用已开启" : "工具调用已关闭");
+  }
   closeSettings();
   fetchModels();
   updateCtxInfo();
@@ -206,20 +226,86 @@ function openProviderEdit(providerId) {
 }
 
 // ============ 预设列表 ============
+// ★ 修复（16）：1.22/1.23 一直存在"预设层是死功能"的问题——
+//   currentPresetId 全项目只有"删除时清空"一处写入，从来没有赋值入口，
+//   所以预设的参数覆盖与 system prompt 永远不会生效，参数继承实际退化为「会话 → 全局」。
+//   这里补上真正的启用入口，并把选择持久化到 cfg.activePresetId。
+function getActivePreset() {
+  if (!currentPresetId) return null;
+  return presets.find(x => x.id === currentPresetId) || null;
+}
+
+function setActivePreset(id) {
+  const p = id ? presets.find(x => x.id === id) : null;
+  currentPresetId = p ? p.id : "";
+  cfg.activePresetId = currentPresetId;
+  saveLocal();
+  renderPresets();
+  if (typeof updatePresetBadge === "function") updatePresetBadge();
+  if (typeof updateParamBtnLabel === "function") updateParamBtnLabel();
+  if (typeof renderMessages === "function") { try { renderMessages(); } catch (e) { } }
+  if (p) {
+    const n = p.params ? Object.keys(p.params).length : 0;
+    setStatus(`已启用预设：${p.name}${n ? `（覆盖 ${n} 项参数）` : ""}`);
+  } else {
+    setStatus("已取消预设，回到全局设置");
+  }
+}
+
 function renderPresets() {
   const list = document.getElementById("presetList");
+  if (!list) return;
   if (!presets.length) { list.innerHTML = '<div style="color:var(--text-dim);font-size:13px">还没有预设</div>'; return; }
   list.innerHTML = presets.map(p => {
+    const promptLen = (p.prompt || "").length;
     const paramCount = p.params ? Object.keys(p.params).length : 0;
     const paramTag = paramCount ? `<span style="color:var(--accent);font-size:12px;margin-left:6px">⚙ ${paramCount}项参数</span>` : "";
-    return `<div class="preset-item"><span>${escapeHtml(p.name)}<span style="color:var(--text-dim);font-size:12px;margin-left:8px">(${p.prompt.length} 字)</span>${paramTag}</span><span><button data-edit="${p.id}">编辑</button><button data-del="${p.id}">删除</button></span></div>`;
+    const active = (p.id === currentPresetId);
+    const activeTag = active ? `<span style="color:#10a37f;font-size:12px;margin-left:6px">● 使用中</span>` : "";
+    const useBtn = active
+      ? `<button data-unuse="1" title="取消使用该预设">停用</button>`
+      : `<button data-use="${escapeHtml(p.id)}" title="启用该预设：其 system prompt 与参数覆盖将生效">启用</button>`;
+    return `<div class="preset-item${active ? " preset-active" : ""}"><span>${escapeHtml(p.name)}<span style="color:var(--text-dim);font-size:12px;margin-left:8px">(${promptLen} 字)</span>${paramTag}${activeTag}</span><span>${useBtn}<button data-edit="${escapeHtml(p.id)}">编辑</button><button data-del="${escapeHtml(p.id)}">删除</button></span></div>`;
   }).join("");
+  list.querySelectorAll("[data-use]").forEach(b => b.onclick = () => setActivePreset(b.dataset.use));
+  list.querySelectorAll("[data-unuse]").forEach(b => b.onclick = () => setActivePreset(""));
   list.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editPreset(b.dataset.edit));
   list.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
     if (!confirm("删除？")) return;
-    presets = presets.filter(x => x.id !== b.dataset.del); if (currentPresetId === b.dataset.del) currentPresetId = "";
+    const wasActive = (currentPresetId === b.dataset.del);
+    presets = presets.filter(x => x.id !== b.dataset.del);
+    if (wasActive) { currentPresetId = ""; cfg.activePresetId = ""; }
     saveLocal(); saveToDisk(); renderPresets();
+    if (wasActive && typeof updatePresetBadge === "function") updatePresetBadge();
+    if (typeof updateParamBtnLabel === "function") updateParamBtnLabel();
   });
+}
+
+// 恢复上次启用的预设（在 init() 里调用）
+function restoreActivePreset() {
+  const id = cfg.activePresetId || "";
+  if (id && presets.some(p => p.id === id)) {
+    currentPresetId = id;
+  } else {
+    currentPresetId = "";
+    if (id) { cfg.activePresetId = ""; saveLocal(); }
+  }
+  if (typeof updatePresetBadge === "function") updatePresetBadge();
+}
+
+// 顶栏显示当前预设（复用会话参数按钮旁边的一个小徽章）
+function updatePresetBadge() {
+  const el = document.getElementById("presetBadge");
+  if (!el) return;
+  const p = getActivePreset();
+  if (p) {
+    el.textContent = "🎭 " + p.name;
+    el.style.display = "inline-flex";
+    el.title = "当前启用的预设：" + p.name + "（点击可停用）";
+  } else {
+    el.textContent = "";
+    el.style.display = "none";
+  }
 }
 function addPreset() {
   editingPresetId = null;
@@ -352,11 +438,24 @@ function renderEmoList() {
 function addEmo() { const m = getEmoMap(); let n = 1, key = "new"; while (m[key]) { n++; key = "new" + n; } m[key] = "(・_・)"; cfg.emoMap = m; saveLocal(); renderEmoList(); setTimeout(() => { const rows = document.querySelectorAll("#emoList .emo-row"); const last = rows[rows.length - 1]; if (last) { const k = last.querySelector(".emo-key"); k.focus(); k.select(); } }, 50); }
 async function resetEmo() {
   if (!confirm("确定要从后端重新拉取颜文字库吗？（会覆盖你本地修改的）")) return;
+  // ★ 修复（14）：/api/emoji 现在后端真的存在了（此前只会 404）。
+  //   当前加载了 Skill 时优先拉该 Skill 的 emoji_config.json，
+  //   否则退回 skill_dir 根目录的那一份。
+  const target = (typeof currentSkillIds !== "undefined" && currentSkillIds.length === 1) ? currentSkillIds[0] : "";
   try {
-    const emojiRes = await fetch(`${getRagUrl()}/api/emoji`);
+    const url = `${getRagUrl()}/api/emoji` + (target ? `?skill_id=${encodeURIComponent(target)}` : "");
+    const emojiRes = await fetch(url);
+    if (!emojiRes.ok) { alert(`拉取失败：HTTP ${emojiRes.status}`); return; }
     const emojiData = await emojiRes.json();
-    if (emojiData.emoji && Object.keys(emojiData.emoji).length > 0) { cfg.emoMap = emojiData.emoji; dynamicEmo = emojiData.emoji; saveLocal(); renderEmoList(); renderMessages(); alert("已从 Python 后端重新加载颜文字！"); }
-    else { alert("后端返回为空，请检查 emoji_config.json 文件是否存在。"); }
+    if (emojiData.emoji && Object.keys(emojiData.emoji).length > 0) {
+      cfg.emoMap = emojiData.emoji;
+      dynamicEmo = emojiData.emoji;
+      saveLocal(); renderEmoList(); renderMessages();
+      alert(`已从后端重新加载 ${Object.keys(emojiData.emoji).length} 条颜文字！`);
+    } else {
+      alert("后端返回为空。\n\n" + (emojiData.error || "") +
+        "\n\n请检查：" + (emojiData.path || `${target ? target + "/" : ""}emoji_config.json`));
+    }
   } catch (e) { alert("拉取失败，请确认 RAG 秘书（Python黑框）已启动。"); }
 }
 

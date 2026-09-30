@@ -1,0 +1,173 @@
+/* ============ 1.23 工具调用 / 多模态图片 ============ */
+
+/* ---- 工具调用折叠卡片（沿用 RAG 引用卡片的视觉语言） ---- */
+.tool-call-box{
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--bg-side);
+  margin:8px 0;
+  overflow:hidden;
+}
+.tool-call-head{
+  display:flex;align-items:center;gap:7px;
+  padding:7px 11px;
+  cursor:pointer;
+  font-size:12px;
+  color:var(--text-dim);
+  user-select:none;
+  transition:background .15s;
+}
+.tool-call-head:hover{background:var(--hover)}
+.tool-arrow{
+  width:0;height:0;
+  border-left:5px solid currentColor;
+  border-top:4px solid transparent;
+  border-bottom:4px solid transparent;
+  transition:transform .18s;
+  flex-shrink:0;
+}
+.tool-call-box.open .tool-arrow{transform:rotate(90deg)}
+.tool-call-list{display:none;padding:0 11px 10px}
+.tool-call-box.open .tool-call-list{display:block}
+
+.tool-call-item{
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:8px 10px;
+  margin-bottom:8px;
+  background:var(--bg);
+}
+.tool-call-item:last-child{margin-bottom:0}
+.tool-call-head-row{
+  display:flex;align-items:center;gap:8px;
+  margin-bottom:6px;flex-wrap:wrap;
+}
+.tool-call-name{font-size:12px;font-weight:500;color:var(--text)}
+.tool-status{
+  padding:1px 7px;border-radius:5px;
+  font-size:10px;font-weight:500;
+  border:1px solid transparent;
+}
+.tool-status.tool-ok{background:rgba(16,163,127,.14);color:#10a37f;border-color:rgba(16,163,127,.3)}
+.tool-status.tool-err{background:rgba(227,75,75,.12);color:#e34b4b;border-color:rgba(227,75,75,.3)}
+.tool-status.tool-pending{background:var(--hover);color:var(--text-dim);border-color:var(--border)}
+.tool-ms{font-size:10px;color:var(--text-dim);margin-left:auto}
+
+.tool-call-block{margin-top:6px}
+.tool-call-label{font-size:10px;color:var(--text-dim);margin-bottom:3px;letter-spacing:.4px}
+.tool-args,.tool-result{
+  margin:0;
+  padding:7px 9px;
+  border-radius:6px;
+  background:var(--code-bg);
+  border:1px solid var(--border);
+  font-size:11px;
+  line-height:1.6;
+  white-space:pre-wrap;
+  word-break:break-word;
+  max-height:220px;
+  overflow-y:auto;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:var(--text);
+}
+.tool-result.pending{color:var(--text-dim);font-style:italic}
+
+/* ---- 消息里的图片 ---- */
+.msg-images{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+.msg-image{
+  max-width:260px;max-height:260px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  cursor:zoom-in;
+  object-fit:cover;
+  transition:transform .15s,border-color .15s;
+}
+.msg-image:hover{transform:scale(1.015);border-color:var(--accent)}
+
+/* 图片放大预览 */
+.img-viewer-mask{
+  z-index:10050;
+  background:rgba(0,0,0,.86);
+  cursor:zoom-out;
+  align-items:center;
+  justify-content:center;
+}
+/* ★ 修复：<img> 现在带 .modal 类以复用尺寸约束（max-width:92vw / max-height:86vh），
+   但 .modal 本身是"卡片"（白底、圆角、内边距、可滚动），这里全部清掉，
+   只保留尺寸限制，让图片按比例缩放且完整可见。 */
+.img-viewer-img{
+  max-width:92vw;
+  max-height:92vh;
+  width:auto;
+  height:auto;
+  padding:0;
+  background:transparent;
+  border:none;
+  border-radius:10px;
+  overflow:visible;
+  object-fit:contain;
+  box-shadow:0 12px 48px rgba(0,0,0,.6);
+}
+
+/* ---- 输入区的图片 chip ---- */
+.temp-image-chip{padding-left:5px}
+.chip-thumb{
+  width:26px;height:26px;
+  border-radius:6px;
+  object-fit:cover;
+  border:1px solid var(--border);
+  flex-shrink:0;
+}
+.chip-name{
+  max-width:130px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.vision-hint{
+  display:inline-flex;align-items:center;
+  font-size:14px;opacity:.55;
+  margin-left:4px;cursor:help;
+  user-select:none;
+}
+
+/* ---- 顶栏工具开关徽章 ---- */
+#toolsBadge{font-weight:600}
+#toolsBtn.on #toolsBadge{color:#10a37f}
+
+/* ---- 费用徽章 ---- */
+.msg-cost{
+  display:inline-flex;align-items:center;
+  padding:1px 6px;border-radius:5px;
+  background:rgba(16,163,127,.12);
+  color:#10a37f;
+  font-size:10px;font-weight:500;
+  border:1px solid rgba(16,163,127,.25);
+  white-space:nowrap;
+}
+.msg-cost.local{
+  background:var(--hover);
+  color:var(--text-dim);
+  border-color:var(--border);
+}
+
+/* ---- 工具信息弹窗 ---- */
+.tools-info-row{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:9px 0;
+  border-bottom:1px solid var(--border);
+}
+.tools-info-row:last-child{border-bottom:none}
+.tools-info-name{font-size:13px;font-weight:500;min-width:96px;flex-shrink:0}
+.tools-info-desc{font-size:12px;color:var(--text-dim);line-height:1.65;flex:1}
+.tools-info-badge{
+  font-size:10px;padding:1px 6px;border-radius:5px;
+  background:var(--hover);color:var(--text-dim);
+  border:1px solid var(--border);flex-shrink:0;
+}
+
+/* ---- 窄屏适配 ---- */
+@media (max-width:900px){
+  .msg-image{max-width:200px;max-height:200px}
+  .tools-info-row{flex-direction:column;gap:4px}
+}

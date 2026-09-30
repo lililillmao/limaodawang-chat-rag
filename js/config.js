@@ -31,7 +31,18 @@ const DEFAULT_CFG = {
   // ★ 长期记忆配置
   memoryEnabled: true, // 默认开启记忆
   memoryRounds: 3,    // 检索时注入最相关的前 N 条记忆
-  memoryExtract: true // 自动从对话提取记忆
+  memoryExtract: true, // 自动从对话提取记忆
+  // ★ 1.23 视觉输入
+  visionEnabled: true,     // 允许拖拽/上传图片
+  imageMaxEdge: 1568,      // 图片压缩后的最长边（像素）
+  // ★ 1.23 工具调用
+  toolsEnabled: false,     // 默认关闭，避免不支持 tool calling 的模型报错
+  maxToolRounds: 5,        // 最大工具调用轮次，防止死循环
+  toolAutoApprove: true,   // 只读工具自动执行，无需逐次确认
+  // ★ 修复（16）：补上预设持久化字段的默认值。
+  //   之前 1.23 一直靠 `cfg.activePresetId || ""` 的兜底在运行，
+  //   显式声明可以让"恢复备份"和"重置配置"的默认值语义更清晰。
+  activePresetId: ""
 };
 
 let cfg = { ...DEFAULT_CFG };
@@ -40,7 +51,9 @@ const LS = {
   cfg: "chat_cfg",
   sessions: "chat_sessions",
   presets: "chat_presets",
-  drafts: "chat_drafts"
+  drafts: "chat_drafts",
+  usage: "chat_usage",         // ★ 1.23 成本统计聚合
+  usageLog: "chat_usage_log"   // ★ 1.23 成本统计明细日志
 };
 
 function getRagUrl() {
@@ -64,6 +77,8 @@ function loadLocal() {
   if (!cfg.emoMap || typeof cfg.emoMap !== "object" || Array.isArray(cfg.emoMap)) cfg.emoMap = {};
   if (!cfg.ragUrl) cfg.ragUrl = DEFAULT_CFG.ragUrl;
   if (!cfg.num_predict) cfg.num_predict = 1024;
+  // ★ 修复（16）：旧版配置没有 activePresetId，读取时补默认值
+  if (cfg.activePresetId === undefined) cfg.activePresetId = "";
   
   // 兼容旧版配置：如果没有 providers，则根据旧版 url 生成一个
   if (!cfg.providers || !Array.isArray(cfg.providers) || cfg.providers.length === 0) {

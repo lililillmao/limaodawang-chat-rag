@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>狸猫AI工具盒 v1.22</title>
+<title>狸猫AI工具盒 v1.23</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" id="hljs-dark">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css" id="hljs-light" disabled>
@@ -12,12 +12,15 @@
 <link rel="stylesheet" href="css/chat.css">
 <link rel="stylesheet" href="css/input.css">
 <link rel="stylesheet" href="css/modal.css">
+<link rel="stylesheet" href="css/stats.css">
+<link rel="stylesheet" href="css/importer.css">
+<link rel="stylesheet" href="css/tools.css">
 </head>
 <body>
 
 <div id="globalDropOverlay" class="global-drop-overlay">
   <div style="font-size: 48px; margin-bottom: 16px;">📥</div>
-  <div style="font-size: 18px; font-weight: 500;">松开鼠标，将文件作为临时知识库</div>
+  <div style="font-size: 18px; font-weight: 500;">松开鼠标，文件作为临时知识库 / 图片作为多模态输入</div>
   <div style="font-size: 13px; opacity: 0.7; margin-top: 8px;">仅本次对话生效，不会污染本地知识库</div>
 </div>
 
@@ -35,6 +38,7 @@
     <button id="exportTxtBtn">↧ 当前TXT</button>
     <button id="backupAllBtn">↧ 备份全部</button>
     <button id="restoreAllBtn">↥ 恢复全部</button>
+    <button id="importExternalBtn" title="导入 ChatGPT / Claude 导出的 conversations.json">↥ 导入历史</button>
   </div>
 </aside>
 
@@ -50,9 +54,12 @@
     <select id="modelSelect2"><option>模型 B</option></select>
     
     <button class="rag-toggle" id="ragBtn" title="开启后从本地知识库检索相关上下文">📚 知识库 <span class="badge" id="ragBadge">关</span></button>
+    <button class="compare-toggle" id="toolsBtn" title="开启后允许模型调用本地工具（读取时间、计算、检索知识库等）">🔧 工具 <span class="badge" id="toolsBadge">关</span></button>
     <span class="spacer"></span>
     <button class="icon-btn" id="paramBtn" title="会话级模型参数">🌡️ 参数</button>
     <button class="icon-btn" id="compressBtn" title="把早期对话压缩成摘要，节省上下文">🗜️</button>
+    <button class="icon-btn" id="statsBtn" title="Token 用量与费用统计">📊</button>
+    <span class="preset-badge" id="presetBadge" style="display:none" title="当前启用的预设"></span>
     <span id="ctxInfo"></span>
     <span id="status" style="font-size:12px;color:var(--text-dim)"><span class="status-dot"></span>就绪</span>
     <button class="icon-btn" id="themeToggle" title="切换主题">🌙</button>
@@ -71,8 +78,8 @@
       <div class="input-foot">
         <span class="hint">Enter 发送 · Ctrl+N 新对话 · Ctrl+K 清空输入 · Esc 停止</span>
         <span class="spacer"></span>
-        <input type="file" id="fileInput" multiple accept=".md,.txt,.pdf,.docx,.py,.json,.csv,.html,.css,.js" style="display: none;">
-        <button id="fileUploadBtn" title="点击选择文件上传" style="background:transparent; border:1px solid var(--border); color:var(--text); font-size:16px;">📎</button>
+        <input type="file" id="fileInput" multiple accept=".md,.txt,.pdf,.docx,.py,.json,.csv,.html,.css,.js,.png,.jpg,.jpeg,.webp,.gif,.bmp,image/*" style="display: none;">
+        <button id="fileUploadBtn" title="点击选择文件或图片上传（也可以直接拖入，或截图后 Ctrl+V 粘贴）" style="background:transparent; border:1px solid var(--border); color:var(--text); font-size:16px;">📎</button>
         <button id="micBtn" title="点击开始/停止语音输入">🎤</button>
         <button id="sendBtn">发送</button>
       </div>
@@ -146,6 +153,45 @@
       </div>
     </div>
 
+    <div class="field">
+      <label>🖼️ 视觉输入（图片）</label>
+      <label style="display:flex; align-items:flex-start; gap:6px; cursor:pointer; font-weight:normal;">
+        <input type="checkbox" id="cfgVisionEnabled" style="margin-top:4px;">
+        <span>允许拖拽 / 上传 / 粘贴图片，走多模态模型</span>
+      </label>
+      <div class="row" style="margin-top:8px; align-items:center; gap:10px;">
+        <span style="font-size:12px; color:var(--text-dim); white-space:nowrap;">图片最长边上限</span>
+        <input type="number" id="cfgImageMaxEdge" min="256" max="4096" step="64" style="width:110px;">
+        <span style="font-size:12px; color:var(--text-dim);">像素（越小越省 token 与存储）</span>
+      </div>
+      <div style="font-size:12px; color:var(--text-dim); margin-top:6px; line-height:1.6;">
+        • 图片发送前会在本地压缩并转成 JPEG，不会上传到除了你选定平台以外的任何服务。<br>
+        • 需要选择支持视觉的模型（本地如 llama3.2-vision / llava / qwen2-vl，云端如 gpt-4o / qwen-vl-max）。<br>
+        • 浏览器本地存储约 5MB，图片会占用其中一部分，建议及时清理不需要的对话。
+      </div>
+    </div>
+
+    <div class="field">
+      <label style="display:flex; justify-content:space-between; align-items:center;">
+        <span>🔧 工具调用（function calling）</span>
+        <label style="display:flex; align-items:center; gap:4px; font-size:12px; font-weight:normal; cursor:pointer;">
+          <input type="checkbox" id="cfgToolsEnabled"> 启用
+        </label>
+      </label>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; line-height:1.6;">
+        让模型能主动调用本地只读工具（读取当前时间、精确计算、检索知识库、列出 Skill、读取会话状态）。
+        全部在浏览器本地执行，无副作用。你也可以右键顶栏的「🔧 工具」按钮查看工具清单。
+      </div>
+      <div class="row" style="align-items:center; gap:10px;">
+        <span style="font-size:12px; color:var(--text-dim); white-space:nowrap;">最大调用轮次</span>
+        <input type="number" id="cfgMaxToolRounds" min="1" max="20" step="1" style="width:90px;">
+        <span style="font-size:12px; color:var(--text-dim);">轮（防止模型陷入无限调用）</span>
+      </div>
+      <div style="font-size:12px; color:#f0a020; margin-top:8px; line-height:1.6;">
+        ⚠️ Ollama 的部分模型对 tool calling 支持参差不齐。若开启后出现报错或回答异常，关闭此开关即可恢复原状。
+      </div>
+    </div>
+
     <div class="field"><label>系统提示词（无Skill时生效）</label><textarea id="cfgSys"></textarea></div>
     <div class="field"><label>Temperature：<span id="tempVal">0.7</span></label><input type="range" id="cfgTemp" min="0" max="2" step="0.1"></div>
     <div class="field"><label>Top P：<span id="toppVal">0.9</span></label><input type="range" id="cfgTopP" min="0" max="1" step="0.05"></div>
@@ -173,6 +219,17 @@
         <button class="color-swatch" data-color="#e91e63" style="background:#e91e63"></button>
         <input type="color" id="cfgAccent" style="width:44px;height:30px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:transparent;padding:2px">
       </div>
+    </div>
+
+    <h2 style="font-size:15px;margin-top:22px">颜文字映射</h2>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
+      模型输出 <code>[emo:标签]</code> 时会被替换成对应颜文字。加载 Skill 后，该 Skill 的
+      <code>emoji_config.json</code> 会自动合并进来；这里可以手动补充或覆盖。
+    </div>
+    <div class="emo-list" id="emoList"></div>
+    <div class="row" style="margin-bottom:8px">
+      <button id="addEmoBtn" style="flex:1;padding:8px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit">＋ 新增颜文字</button>
+      <button id="resetEmoBtn" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-family:inherit">↻ 从后端重新拉取</button>
     </div>
 
     <h2 style="font-size:15px;margin-top:22px">提示词模板</h2>
@@ -261,6 +318,38 @@
 </div>
 
 <input type="file" id="restoreFile" accept=".json,application/json" style="display:none">
+<input type="file" id="importExternalFile" accept=".json,application/json" style="display:none">
+
+<div class="modal-mask" id="statsMask">
+  <div class="modal" style="width:760px">
+    <h2>📊 成本统计</h2>
+    <div id="statsBody"></div>
+    <div class="modal-actions">
+      <button class="primary" id="closeStatsBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="importExternalMask">
+  <div class="modal" style="width:760px">
+    <h2>↥ 导入 ChatGPT / Claude 历史</h2>
+    <div id="importExternalBody"></div>
+    <div class="modal-actions">
+      <button id="closeImportExternalBtn">取消</button>
+      <button class="primary" id="confirmImportExternalBtn">导入所选</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="toolsInfoMask">
+  <div class="modal" style="width:600px">
+    <h2>🔧 工具调用</h2>
+    <div id="toolsInfoBody"></div>
+    <div class="modal-actions">
+      <button class="primary" id="closeToolsInfoBtn">关闭</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
@@ -274,6 +363,9 @@
 <script src="js/session.js"></script>
 <script src="js/markdown.js"></script>
 <script src="js/api.js"></script>
+<script src="js/features/tools.js"></script>
+<script src="js/features/stats.js"></script>
+<script src="js/features/importer.js"></script>
 <script src="js/ui/sidebar.js"></script>
 <script src="js/ui/input.js"></script>
 <script src="js/ui/settings.js"></script>

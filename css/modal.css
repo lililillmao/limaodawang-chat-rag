@@ -17,6 +17,9 @@
 .preset-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
 .preset-item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px}
 .preset-item button{font-size:12px;padding:3px 8px;margin-left:4px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:6px;cursor:pointer}
+/* ★ 16：预设启用态 */
+.preset-item.preset-active{border-color:#10a37f;background:rgba(16,163,127,.08)}
+.preset-item button:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ============ 状态点 ============ */
 .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4caf50;margin-right:6px}

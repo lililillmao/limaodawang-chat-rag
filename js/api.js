@@ -76,7 +76,9 @@ async function fetchModels() {
 }
 
 // ★ 修复：加了 providerId 参数，跨平台对比才能正常工作
-async function streamRequest(model, messages, onChunk, onDone, onError, signal, providerId = null) {
+// ★ 1.23：新增第 8 个参数 opts = { tools, toolChoice }
+// ★ 1.23.1：新增对 Ollama tool_calls 对象型 arguments 的兼容
+async function streamRequest(model, messages, onChunk, onDone, onError, signal, providerId = null, opts = null) {
   const pid = providerId || cfg.modelProviderId || currentProviderId;
   const provider = cfg.providers.find(p => p.id === pid) || cfg.providers[0];
 
@@ -84,6 +86,8 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
     onError(new Error("未找到对应的平台配置"), false);
     return;
   }
+
+  const isOllama = provider.type === "ollama";
 
   try {
     const ep = getEffectiveParams();
@@ -99,19 +103,28 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
       }
     };
 
-    if (provider.type === "ollama") {
+    if (isOllama) {
       body.options.repeat_penalty = 1.15;
       body.options.repeat_last_n = 256;
       body.options.stop = ["<|im_end|>", "\n用户：", "\n\n用户："];
     }
 
+    // ★ 1.23：工具声明
+    if (opts && Array.isArray(opts.tools) && opts.tools.length) {
+      body.tools = opts.tools;
+      if (!isOllama) body.tool_choice = opts.toolChoice || "auto";
+    }
+
+    // ★ 1.23：让 OpenAI 兼容平台在流式模式下也返回 usage
+    if (!isOllama) body.stream_options = { include_usage: true };
+
     const baseUrl = provider.baseUrl.replace(/\/$/, "");
-    const endpoint = provider.type === "ollama" ? "/api/chat" : "/v1/chat/completions";
+    const endpoint = isOllama ? "/api/chat" : resolveOpenAIEndpoint(provider.baseUrl);
 
     const headers = { "Content-Type": "application/json" };
     if (provider.apiKey) headers["Authorization"] = "Bearer " + provider.apiKey;
 
-    const r = await fetch(baseUrl + endpoint, {
+    const r = await fetch(isOllama ? baseUrl + endpoint : endpoint, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -133,7 +146,7 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
       if (done) break;
       buf += decoder.decode(value, { stream: true });
 
-      if (provider.type === "ollama") {
+      if (isOllama) {
         let idx;
         while ((idx = buf.indexOf("\n")) >= 0) {
           const line = buf.slice(0, idx).trim();
@@ -141,7 +154,24 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
           if (!line) continue;
           try {
             const obj = JSON.parse(line);
-            if (obj.message) onChunk(obj.message);
+            if (obj.message) {
+              onChunk(obj.message);
+            }
+            // ★ 1.23：Ollama 在最后一帧（obj.done === true）才给出真实 token 用量。
+            if (obj.done) {
+              const pt = obj.prompt_eval_count;
+              const ct = obj.eval_count;
+              if (pt != null || ct != null) {
+                onChunk({
+                  usage: {
+                    prompt_tokens: pt || 0,
+                    completion_tokens: ct || 0,
+                    total_tokens: (pt || 0) + (ct || 0),
+                    source: "ollama"
+                  }
+                });
+              }
+            }
           } catch (e) {}
         }
       } else {
@@ -154,16 +184,42 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
           if (dataStr === "[DONE]") continue;
           try {
             const obj = JSON.parse(dataStr);
-            if (obj.choices && obj.choices[0] && obj.choices[0].delta) {
-              const delta = obj.choices[0].delta;
+
+            // ★ 1.23：usage 优先独立处理
+            if (obj.usage) {
+              onChunk({
+                usage: {
+                  prompt_tokens: obj.usage.prompt_tokens || 0,
+                  completion_tokens: obj.usage.completion_tokens || 0,
+                  total_tokens: obj.usage.total_tokens || 0,
+                  source: "openai"
+                }
+              });
+            }
+
+            const choice = obj.choices && obj.choices[0];
+            if (choice) {
+              const delta = choice.delta || {};
               const msg = {
                 content: delta.content || "",
                 thinking: delta.reasoning_content || delta.reasoning || ""
               };
+              // ★ 1.23：工具调用增量分片透传，并且必须带上 index。
+              if (Array.isArray(delta.tool_calls) && delta.tool_calls.length) {
+                msg.tool_calls = delta.tool_calls.map((tc, i) => ({
+                  index: tc.index != null ? tc.index : i,
+                  id: tc.id || "",
+                  type: tc.type || "function",
+                  function: {
+                    name: (tc.function && tc.function.name) || "",
+                    arguments: (tc.function && tc.function.arguments) || ""
+                  }
+                }));
+              }
+              if (choice.finish_reason) {
+                msg.finish_reason = choice.finish_reason;
+              }
               onChunk(msg);
-            }
-            if (obj.usage) {
-              onChunk({ usage: obj.usage });
             }
           } catch (e) {}
         }
@@ -174,6 +230,74 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
     if (e.name === "AbortError") { onError && onError(e, true); }
     else { onError && onError(e, false); }
   }
+}
+
+// ★ 1.23：工具调用累计器
+// ★ 1.23.1：兼容 Ollama 老版本返回的对象型 arguments
+function accumulateToolCalls(store, incoming) {
+  if (!Array.isArray(incoming)) return store || [];
+  const list = Array.isArray(store) ? store : [];
+  for (const tc of incoming) {
+    const i = (tc.index != null) ? tc.index : 0;
+    if (!list[i]) list[i] = { id: "", type: "function", function: { name: "", arguments: "" } };
+    const slot = list[i];
+    if (tc.id) slot.id = tc.id;
+    if (tc.type) slot.type = tc.type;
+    if (tc.function) {
+      // 工具名拼接（识别重复推送）
+      if (tc.function.name) {
+        const frag = tc.function.name;
+        const cur = slot.function.name;
+        if (!cur) {
+          slot.function.name = frag;
+        } else if (frag === cur || frag.startsWith(cur)) {
+          slot.function.name = frag.length > cur.length ? frag : cur;
+        } else if (cur.endsWith(frag)) {
+          // 重复推送同一片段：忽略
+        } else {
+          slot.function.name = cur + frag;
+        }
+      }
+      // ★ 1.23.1 修复：Ollama 老版本返回的是对象而非字符串，
+      //   直接 += 会变成 "[object Object]"，必须按类型转换。
+      if (tc.function.arguments) {
+        const frag = (typeof tc.function.arguments === "string")
+          ? tc.function.arguments
+          : JSON.stringify(tc.function.arguments);
+        slot.function.arguments += frag;
+      }
+    }
+  }
+  return list;
+}
+
+// ★ 1.23：把工具调用列表归一成可直接写进 message 的干净结构（丢掉 index）
+function normalizeToolCalls(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(Boolean).map((tc, i) => ({
+    id: tc.id || ("call_" + i),
+    type: "function",
+    function: {
+      name: (tc.function && tc.function.name) || "",
+      arguments: (tc.function && tc.function.arguments) || "{}"
+    }
+  })).filter(tc => tc.function.name);
+}
+
+// ★ 1.23：multimodal 消息构造
+// ★ 1.23.1：历史消息里的图片可能没有 b64，从 dataUrl 现场切
+function buildMultimodalUserMessage(text, images, providerType) {
+  if (!images || !images.length) return { role: "user", content: text };
+  if (providerType === "ollama") {
+    const b64List = images.map(im => im.b64 || (String(im.dataUrl || "").split(",")[1] || "")).filter(Boolean);
+    return { role: "user", content: text, images: b64List };
+  }
+  const parts = [];
+  if (text) parts.push({ type: "text", text });
+  for (const im of images) {
+    if (im && im.dataUrl) parts.push({ type: "image_url", image_url: { url: im.dataUrl } });
+  }
+  return { role: "user", content: parts };
 }
 
 async function testProviderConnection(provider) {

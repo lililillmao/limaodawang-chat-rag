@@ -27,6 +27,10 @@ let starFilter = false;
 let quoteState = null;
 let speakingBtn = null;
 let navTicks = [];
+// ★ 修复（7）：navTicks 是密集数组（只存可见消息的刻度），但高亮逻辑需要按
+//   "消息下标"查找刻度。存在被跳过渲染的消息（隐藏消息 / 工具结果）时两者会错位，
+//   表现为高亮错条或刻度永远不亮。故额外维护这张"消息下标 → 刻度元素"的映射。
+let navTicksByMsgIdx = {};
 let navObserver = null;
 
 // 模型列表缓存
@@ -61,6 +65,13 @@ let editingProviderId = null;
 // ★ 临时 RAG 文件
 let tempRagFiles = [];
 
+// ★ 1.23：临时图片（多模态输入）
+// 元素形状：{ name, mime, dataUrl, b64, size }
+let tempImages = [];
+
+// ★ 1.23：工具调用轮次显示
+let toolRoundCurrent = 0;
+let toolRoundMax = 0;
+
 // ★ 长期记忆系统相关状态
 let memories = []; // 记忆列表
-let memoryEnabled = false; // 是否启用记忆注入

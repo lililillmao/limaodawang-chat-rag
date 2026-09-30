@@ -1,5 +1,91 @@
 # 更新日志
 
+## [1.23.0] - 2026-09-30
+
+### ✨ 新增功能
+
+#### 📊 成本统计
+
+- **真实 token 用量打通**（这是前置修复，见下方"修复"）：OpenAI 兼容平台在流式请求中带上 `stream_options:{include_usage:true}`；Ollama 读取流最后一帧的 `prompt_eval_count` / `eval_count`。1.22 这两条链路实际都拿不到数据。
+- **单条费用徽章**：消息头显示 `💰 $0.0032`，本地模型显示 `💰 本地免费`。
+- **统计面板**（顶栏「📊」）：
+  - 汇总卡片：总调用次数、总 prompt / completion token、总费用
+  - 时间范围：近 7 / 30 / 90 天 / 全部
+  - 分组维度：按平台 / 按模型 / 按日期
+  - 纯 SVG 柱状趋势图，可切换「调用次数 / token 总量」，零图表库
+  - 导出 CSV（带 UTF-8 BOM，Excel 不乱码）
+  - 清空统计（二次确认）
+- **价格表**：内置 DeepSeek / OpenAI / Claude / Moonshot / Qwen / GLM / Gemini 常见模型的参考价，位于 `js/features/stats.js` 的 `USAGE_PRICE_TABLE`，可自行修改。
+- **只记真实值**：拿不到真实用量就不记账，绝不用估算值污染统计。历史消息仍回退显示 `≈ N token`（估算）且不显示费用。
+- **存储**：新增两个独立的 localStorage 键 `chat_usage`（按天 + 平台|模型二级索引，O(1) 累加）与 `chat_usage_log`（明细日志，上限 5000 条滚动删除）。写入 800ms 节流，页面隐藏/关闭时强制落盘。
+
+#### 🖼️ 视觉输入（多模态）
+
+- **三种入口**：拖拽图片、点击 📎 回形针选择、**Ctrl+V 直接粘贴截图**。
+- **自动分流**：拖入混合内容时，图片走多模态通道，文档走临时知识库通道，互不干扰。
+- **本地压缩**：canvas 缩放（默认最长边 1568px、可调 256~4096）+ 转 JPEG，质量从 0.85 逐档降低直到满足体积上限；GIF 不重编码以免丢帧。
+- **缩略图 chip**：与临时文件 chip 混排在同一区域，可单独删除；一次最多 6 张，单张原图上限 12MB。
+- **双平台消息体**：Ollama 用 `message.images = [base64]`，OpenAI 兼容用 `content:[{type:"text"},{type:"image_url"}]`。
+- **消息内渲染图片**，点击可放大预览（Esc 关闭）。
+- 设置面板新增「🖼️ 视觉输入」区块，可整体关闭或调整最长边。
+
+#### 🔧 工具调用（function calling）
+
+- **5 个内置工具**（全部只读、无副作用）：`rag_search`（检索知识库）、`get_current_time`（读取当前时间）、`calculator`（精确计算）、`list_skills`（列出可用 Skill）、`get_session_info`（读取会话状态）。
+- **多轮调用**：生成 → 执行工具 → 结果回灌 → 再生成，轮次上限默认 5（设置可调 1~20），达到上限会明确提示而非静默停止。
+- **调用过程 UI**：折叠卡片展示每轮的工具名、参数 JSON、结果、耗时与成功/失败状态；点击工具名区域可展开收起。
+- **顶栏开关**「🔧 工具」（默认关闭），**右键可查看工具清单**；设置面板也有开关与轮次配置。
+- **安全设计**：
+  - 工具全部在浏览器本地执行，不经过后端，不新增鉴权面
+  - 只注册只读工具，**不提供**写文件或执行命令的能力
+  - 计算器使用**手写递归下降解析器**，不用 `eval` / `new Function`（模型输出是不可信输入），并拒绝字母、分号、方括号、反引号等注入尝试
+  - 单次工具结果超过 4000 字截断，防止撑爆上下文
+  - 流式过程中点「停止」会立即中断，不进入下一轮
+- **OpenAI 分片正确拼接**：工具名与 `arguments` 在流式响应中是**分片推送**的，按 `index` 归并并识别重复推送，避免拼出 `rag_searchrag_search` 这类坏名字。
+
+#### ↥ 导入 ChatGPT / Claude 历史
+
+- **格式自动识别**：ChatGPT（有 `mapping`）/ Claude（有 `chat_messages`）/ 本项目备份（有 `sessions`）/ 未知。
+- **ChatGPT 对话树还原**：从 `current_node` 沿 `parent` 回溯成线性；`current_node` 缺失时退化为最长路径回溯，再退化为按时间排序。含**成环保护**（`Set` 记录已访问节点，不死循环）。
+- **完整边角处理**：
+  - `parts` 数组里的图片/语音/视频/附件转为 `[图片]` `[语音]` `[视频]` `[附件]` 占位
+  - 跳过 `system` / `tool` 角色消息与 `metadata.is_visually_hidden_from_conversation` 标记的隐藏消息
+  - 时间三种形态全兼容：Unix 秒（含小数）、毫秒、ISO 字符串
+  - Claude 的 `thinking` 片段归入思考区
+- **预览与勾选**：显示识别格式、会话数、可导入/跳过数、消息总数、时间范围；逐条勾选，支持全选 / 全不选 / 只选非重复；明显重复的会话标 `⚠️ 疑似重复` 且默认不勾选（只提示，不自动删）。
+- **配额保护与回滚**：导入前用 `navigator.storage.estimate()` 预估空间；每个会话写入后单独 try/catch `saveLocal()`；命中 `QuotaExceededError` 时**立即回滚本次已导入的全部会话**并保持原有数据不变，同时给出"分批导入 / 绑定存储目录"的建议。
+- **追加式导入**：绝不覆盖或删除现有对话；每 20 个会话让出主线程并刷新进度；超大文件（>300MB）先确认。
+
+### 🐛 修复
+
+- **修复 Ollama 的真实 token 用量被完全丢弃**：1.22 的流解析只读 `obj.message`，忽略了最后一帧的 `prompt_eval_count` / `eval_count`，导致本地模型用量 100% 丢失。
+- **修复 OpenAI 兼容平台流式请求拿不到 usage**：1.22 未发送 `stream_options:{include_usage:true}`，绝大多数网关在 `stream:true` 时不会返回 usage；同时原解析逻辑在 `choices` 为空时会把整帧（含 usage）丢掉。
+- **修复编辑重发必然崩溃**：`saveEditMessage` 把 `fetchRagContext()` 返回的 `{context, sources}` 对象当成字符串传给了 `runStream`，导致 `buildMessages` 里 `ragContext.trim()` 抛 `TypeError`。
+- **修复历史导入丢弃整条会话**：`findImportLongestChain` 的叶子判定写反了（把"被别人当作子节点的节点"当成叶子判据），导致 `current_node` 缺失时一个叶子都找不到，最长路径回溯完全失效。
+- **修复 ChatGPT 隐藏消息被导入**：过滤 `metadata.is_visually_hidden_from_conversation`，避免出现用户从未见过的气泡。
+- **修复多平台 baseUrl 拼接**：新增 `resolveOpenAIEndpoint()`，正确识别 `.../v1`、`.../v1/`、以及已写全的 `.../v1/chat/completions`，避免拼出重复路径。
+- **修正备份文件的版本号**：`backupAll()` 里硬编码的 `"1.17"` 改为 `"1.23"`。
+
+### 🔧 优化
+
+- 消息头的 token 显示改为**优先真实值**：有服务端用量时显示 `↑prompt ↓completion` 并附悬浮说明，没有时仍回退 `≈ N token`（保持对历史数据的兼容）。
+- 导出 MD / TXT 时，若消息含工具调用或图片，会追加对应的说明段落；普通对话的导出结果**完全不变**。
+- 侧栏新增「↥ 导入历史」入口。
+- 图片放大预览、工具清单弹窗、统计面板都支持 Esc 关闭。
+
+### 📦 依赖变更
+
+- **无新增依赖**。四个新功能全部在前端实现，`requirements.txt` 未改动。
+
+### 🔒 兼容性
+
+- **数据结构零破坏**：`cfg` 只新增字段（读取自动带默认值）；`sessions` / `messages` 只**可选地**多出 `images` / `toolCalls` / `toolResults` / `promptTokens` / `completionTokens`；`memory.json` / `chroma_db` / `file_hashes.json` 未改动。
+- **备份双向兼容**：1.22 的备份能在 1.23 恢复，1.23 的备份也能在 1.22 恢复（新字段被忽略）。
+- **旧消息渲染自动降级**：没有新字段的历史消息走原有估算与渲染路径，不会报错。
+- **新功能可整体关闭**：工具调用默认关闭，关闭后行为与 1.22 完全一致；视觉输入可在设置中关闭。
+
+---
+
 ## [1.22.0] - 2026-09-29
 
 ### ✨ 新增功能

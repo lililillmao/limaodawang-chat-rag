@@ -75,6 +75,21 @@ async function fetchSkillMeta(skillId) {
   return { id: skillId, name: data.name || skillId, prompt: data.content || "", emoji: data.emoji || {}, scope: data.rag_scope || "self" };
 }
 
+// ★ 修复（14）：轻量拉取单个 Skill 的颜文字表。
+//   原来只为了补 emoji 就调用 fetchSkillMeta（会把整个 SKILL.md 正文也拉回来），
+//   多 Skill 组合时浪费明显。现在走后端新补的 /api/emoji 接口。
+async function fetchSkillEmoji(skillId) {
+  try {
+    const res = await fetch(`${getRagUrl()}/api/emoji?skill_id=${encodeURIComponent(skillId)}`);
+    if (!res.ok) return {};
+    const data = await res.json();
+    return (data && data.emoji) ? data.emoji : {};
+  } catch (e) {
+    console.warn(`[Skill] 拉取颜文字失败 "${skillId}"：`, e);
+    return {};
+  }
+}
+
 async function setActiveSkills(ids) {
   ids = ids.filter(Boolean);
   const validIds = [];
@@ -82,11 +97,17 @@ async function setActiveSkills(ids) {
     let meta = skillMetaCache[id];
     const promptMissing = !meta || !meta.prompt;
     const emojiMissing = !meta || !meta.emoji || Object.keys(meta.emoji).length === 0;
-    if (promptMissing || emojiMissing) {
+    if (promptMissing) {
       try {
         const fresh = await fetchSkillMeta(id);
         if (fresh) { skillMetaCache[id] = fresh; meta = fresh; console.log(`[Skill] 已加载 "${id}"`); }
       } catch (e) { console.warn(`[Skill] 加载 "${id}" 失败：`, e); }
+    } else if (emojiMissing) {
+      // ★ 修复（14）：只缺颜文字时走轻量接口，不再把整个 SKILL.md 正文重复拉一遍
+      try {
+        const emo = await fetchSkillEmoji(id);
+        if (emo && Object.keys(emo).length) { meta.emoji = emo; }
+      } catch (e) { console.warn(`[Skill] 加载颜文字 "${id}" 失败：`, e); }
     }
     if (meta && meta.prompt) validIds.push(id);
   }
@@ -199,6 +220,10 @@ async function init() {
   } catch (e) { console.warn("⚠️ 无法连接后端获取 Skill 列表"); }
 
   renderSessions(); renderPresets(); renderMessages(); renderQuickPrompts(); updateRagBadge(); restoreDraft();
+
+  // ★ 修复（16）：恢复上次启用的预设（此前 currentPresetId 从来没有赋值入口，
+  //   预设的参数覆盖与 system prompt 永远不生效）
+  if (typeof restoreActivePreset === "function") restoreActivePreset();
   
   // ★ 核心：初始化拖拽/点击上传
   bindScrollWatcher(); 
@@ -208,6 +233,8 @@ async function init() {
   updateParamBtnLabel();
   updateBreadcrumb();
   setCompareMode(cfg.compareMode || false);
+  // ★ 1.23：恢复工具开关状态
+  if (typeof updateToolsBadge === "function") updateToolsBadge();
 
   const on = (id, event, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(event, fn); else console.warn(`[UI] 元素 ${id} 不存在，已跳过绑定`); };
   
@@ -252,6 +279,11 @@ async function init() {
   on("pickFolderBtn", "click", pickFolder);
   on("addTplBtn", "click", addTpl);
   on("resetTplBtn", "click", resetTpl);
+  // ★ 修复（14）：给颜文字区块补上按钮绑定（此前 addEmo/resetEmo 定义了却没有任何入口）
+  on("addEmoBtn", "click", addEmo);
+  on("resetEmoBtn", "click", resetEmo);
+  // ★ 修复（16）：点击顶栏预设徽章可快速停用当前预设
+  on("presetBadge", "click", () => { if (typeof setActivePreset === "function") setActivePreset(""); });
   on("addPresetBtn", "click", addPreset);
   on("importPresetFolderBtn", "click", importPresetFolder);
   on("closeSettingsBtn", "click", closeSettings);
@@ -316,6 +348,41 @@ async function init() {
   on("compareBtn", "click", () => { setCompareMode(!cfg.compareMode); });
   on("ragBtn", "click", () => { cfg.ragEnabled = !cfg.ragEnabled; saveLocal(); updateRagBadge(); if (cfg.ragEnabled) setStatus("知识库已开启"); else setStatus("知识库已关闭"); });
 
+  // ★ 1.23：工具调用开关
+  on("toolsBtn", "click", () => {
+    cfg.toolsEnabled = !cfg.toolsEnabled;
+    saveLocal(); updateToolsBadge();
+    if (cfg.toolsEnabled) setStatus("🔧 工具调用已开启（点击可按 Shift 查看工具清单）");
+    else setStatus("工具调用已关闭");
+    if (typeof renderToolsInfo === "function") renderToolsInfo();
+  });
+  on("toolsBtn", "contextmenu", (e) => {
+    e.preventDefault();
+    if (typeof renderToolsInfo === "function") renderToolsInfo();
+    const m = document.getElementById("toolsInfoMask"); if (m) m.classList.add("show");
+  });
+  on("closeToolsInfoBtn", "click", () => { const m = document.getElementById("toolsInfoMask"); if (m) m.classList.remove("show"); });
+  on("toolsInfoMask", "click", (e) => { if (e.target.id === "toolsInfoMask") e.target.classList.remove("show"); });
+
+  // ★ 1.23：成本统计
+  on("statsBtn", "click", openStats);
+  on("closeStatsBtn", "click", closeStats);
+  on("statsMask", "click", (e) => { if (e.target.id === "statsMask") closeStats(); });
+
+  // ★ 1.23：导入 ChatGPT / Claude 历史
+  on("importExternalBtn", "click", () => {
+    if (typeof openImportExternal === "function") openImportExternal();
+    else document.getElementById("importExternalFile").click();
+  });
+  on("importExternalFile", "change", async (e) => {
+    const f = e.target.files[0];
+    if (f && typeof handleExternalImportFile === "function") await handleExternalImportFile(f);
+    e.target.value = "";
+  });
+  on("closeImportExternalBtn", "click", () => { if (typeof closeImportExternal === "function") closeImportExternal(); });
+  on("confirmImportExternalBtn", "click", () => { if (typeof confirmImportExternal === "function") confirmImportExternal(); });
+  on("importExternalMask", "click", (e) => { if (e.target.id === "importExternalMask" && typeof closeImportExternal === "function") closeImportExternal(); });
+
   document.querySelectorAll("#accentPicker .color-swatch").forEach(s => { s.onclick = () => { document.getElementById("cfgAccent").value = s.dataset.color; document.querySelectorAll("#accentPicker .color-swatch").forEach(x => x.classList.remove("active")); s.classList.add("active"); }; });
   on("cfgAccent", "input", (e) => { document.querySelectorAll("#accentPicker .color-swatch").forEach(x => x.classList.toggle("active", (x.dataset.color || "").toLowerCase() === e.target.value.toLowerCase())); });
 
@@ -326,7 +393,7 @@ async function init() {
   }
   on("sendBtn", "click", () => { if (generating) { if (abortCtrl) abortCtrl.abort(); } else sendMessage(); });
 
-  window.addEventListener("beforeunload", () => { saveDraft(); try { saveLocal(); } catch (e) { } });
+  window.addEventListener("beforeunload", () => { saveDraft(); try { saveLocal(); } catch (e) { } try { flushUsage(); } catch (e) { } });
   
   await fetchModels(); updateCtxInfo();
   setInterval(pollBuildStatus, 3000);

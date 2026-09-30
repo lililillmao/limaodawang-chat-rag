@@ -67,6 +67,24 @@ function setStatus(txt, err){
     `<span class="status-dot${err ? " err" : ""}"></span>${escapeHtml(txt)}`;
 }
 
+// ============ ★ 1.23 新增：通用辅助 ============
+
+// 从 baseUrl 推断一个 OpenAI 兼容平台默认的对话端点
+// 有些平台给的地址是完整的 .../v1/chat/completions，此时直接用，避免拼成 .../v1/chat/completions/v1/chat/completions
+function resolveOpenAIEndpoint(baseUrl){
+  const b = String(baseUrl || "").replace(/\/+$/, "");
+  if (/\/chat\/completions$/.test(b)) return b;
+  if (/\/v\d+$/.test(b)) return b + "/chat/completions";
+  if (/\/v\d+\//.test(b)) return b.replace(/\/+$/, "");
+  return b + "/v1/chat/completions";
+}
+
+// 安全取值：把可能是 undefined/null 的 token 数归一成数字
+function toTokenNum(v){
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
 // ============ 会话分支树辅助 ============
 
 function getSessionById(id){
