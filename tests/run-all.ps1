@@ -8,9 +8,10 @@ param(
 # Runs, in order:
 #   1. static checks (per-file syntax, duplicate top-level declarations, merged parse, python syntax)
 #   2. tools module tests          (tool registry, safe calculator, tool-call accumulation, multimodal bodies)
-#   3. importer module tests        (ChatGPT / Claude parsing, tree backtrace, cycles, hidden messages)
-#   4. integration smoke test       (loads all modules in index.html order, runs init(), checks old + new APIs)
-#   5. backend regression tests     (split_text guard, watchdog ignore regex, skill name, /api/emoji, memory ids)
+#   3. persistence module tests     (key registry, single source of truth, throttle, quota, disk-failure visibility)
+#   4. importer module tests        (ChatGPT / Claude parsing, tree backtrace, cycles, hidden messages)
+#   5. integration smoke test       (loads all modules in index.html order, runs init(), checks old + new APIs)
+#   6. backend regression tests     (split_text guard, watchdog ignore regex, skill name, /api/emoji, memory ids)
 
 $ErrorActionPreference = "Continue"
 if (-not $Root) {
@@ -28,7 +29,7 @@ $failed = 0
 # ---------- 1. static checks ----------
 $staticScript = Join-Path $PSScriptRoot "static-check.ps1"
 if (Test-Path -LiteralPath $staticScript) {
-    Say "########## 1/5  static checks ##########" Cyan
+    Say "########## 1/6  static checks ##########" Cyan
     & $staticScript -Root $Root
     if ($LASTEXITCODE -ne 0) { $failed++ }
     Say ""
@@ -39,9 +40,10 @@ if (Test-Path -LiteralPath $staticScript) {
 
 # ---------- 2..4 node based suites ----------
 $suites = @(
-    @{ name = "2/5  tools module";     file = "test_tools.js";       args = @((Join-Path $Root "js\features\tools.js"), (Join-Path $Root "js\api.js")) },
-    @{ name = "3/5  importer module";  file = "test_importer.js";    args = @((Join-Path $Root "js\features\importer.js")) },
-    @{ name = "4/5  integration";      file = "test_integration.js"; args = @($Root) }
+    @{ name = "2/6  tools module";       file = "test_tools.js";       args = @((Join-Path $Root "js\features\tools.js"), (Join-Path $Root "js\api.js")) },
+    @{ name = "3/6  persistence module"; file = "test_persistence.js"; args = @($Root) },
+    @{ name = "4/6  importer module";    file = "test_importer.js";    args = @((Join-Path $Root "js\features\importer.js")) },
+    @{ name = "5/6  integration";        file = "test_integration.js"; args = @($Root) }
 )
 
 foreach ($s in $suites) {
@@ -54,9 +56,9 @@ foreach ($s in $suites) {
     Say ""
 }
 
-# ---------- 5. backend (python) ----------
+# ---------- 6. backend (python) ----------
 $backend = Join-Path $PSScriptRoot "test_backend.py"
-Say "########## 5/5  backend regression ##########" Cyan
+Say "########## 6/6  backend regression ##########" Cyan
 if (-not (Test-Path -LiteralPath $backend)) {
     Say ("!! missing: " + $backend) Red
     $failed++

@@ -236,7 +236,7 @@ async function init() {
   if (!cfg.ragUrl) cfg.ragUrl = DEFAULT_CFG.ragUrl;
   applyFontSize(); applyTheme();
 
-  try { const h = await idbGet("folderHandle"); if (h) { folderHandle = h; cfg.dir = h.name; const ok = await ensureFolderPermission().catch(() => false); if (ok) await loadFromDisk(); } } catch (e) { }
+  try { const h = await idbGet(PERSIST_DB.folderHandleKey); if (h) { folderHandle = h; cfg.dir = h.name; setFolderBackend(makeFolderBackend(h)); const ok = await ensureFolderPermission().catch(() => false); if (ok) await loadFromDisk(); } } catch (e) { }
 
   try {
     const skillRes = await fetch(`${getRagUrl()}/api/skills`);
@@ -428,7 +428,28 @@ async function init() {
   }
   on("sendBtn", "click", () => { if (generating) { if (abortCtrl) abortCtrl.abort(); } else sendMessage(); });
 
-  window.addEventListener("beforeunload", () => { saveDraft(); try { saveLocal(); } catch (e) { } try { flushUsage(); } catch (e) { } });
+  // ★ 1.24：落盘状态可见化。
+  //   以前磁盘写失败是完全无声的（saveToDisk 整个函数体裹在 catch(e){} 里），
+  //   用户只会发现「关掉标签页再打开，刚聊的内容没了」。
+  //   持久化模块只报告事实，这里负责把它说出来。同一条错误只提示一次。
+  if (typeof onPersistStatus === "function") {
+    let warnedKey = "";
+    onPersistStatus((st) => {
+      if (st.ok) { warnedKey = ""; return; }
+      const e = st.lastError;
+      if (!e || e.weight !== "critical") return;   // 可放弃的切片不打扰用户
+      const key = e.slice + "|" + e.message;
+      if (key === warnedKey) return;
+      warnedKey = key;
+      setStatus("⚠️ 数据保存失败（" + e.slice + "）：" + e.message, true);
+    });
+  }
+
+  // ★ 1.24：页面隐藏 / 关闭时把积压写掉，并且保证磁盘不落后于内存。
+  //   原来这里只写 localStorage 与统计，从不写磁盘 —— 那正是丢数据的机制。
+  const onLeave = () => { try { saveDraft(); } catch (e) { } try { flushPersist(); } catch (e) { } };
+  window.addEventListener("beforeunload", onLeave);
+  window.addEventListener("pagehide", onLeave);
   
   await fetchModels(); updateCtxInfo();
   setInterval(pollBuildStatus, 3000);
