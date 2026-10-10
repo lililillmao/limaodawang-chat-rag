@@ -106,8 +106,6 @@ def _load_config_sandboxed():
         "chunk_overlap": 100,
         "host": "127.0.0.1",
         "port": 8000,
-        "safety_keywords": [],
-        "safety_fallback_path": "",
     }
 
 
@@ -127,8 +125,6 @@ rag.CHUNK_OVERLAP = 100
 rag.CONFIG_PATH = os.path.join(SANDBOX, "config.json")
 rag.MEMORY_PATH = os.path.join(SANDBOX, "memory.json")
 rag.HASH_CACHE_PATH = os.path.join(SANDBOX, "file_hashes.json")
-rag.SAFETY_KEYWORDS = []
-rag.SAFETY_FALLBACK_PATH = ""
 # chroma 用沙箱里的独立目录，避免动到真实向量库
 rag.CHROMA_PATH = os.path.join(SANDBOX, "chroma_db")
 import chromadb

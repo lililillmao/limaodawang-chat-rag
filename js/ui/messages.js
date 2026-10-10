@@ -95,6 +95,8 @@ function switchVersion(m, dir) {
     // 有记录就用该版本的，没有就置空（不能沿用上一个版本的值）
     m.toolCalls = Array.isArray(v.toolCalls) ? v.toolCalls : null;
     m.toolResults = Array.isArray(v.toolResults) ? v.toolResults : null;
+    // ★ 1.23.2：_toolHistory 也要一起还原
+    m._toolHistory = Array.isArray(v.toolHistory) ? v.toolHistory : null;
     m.promptTokens = toTokenNum(v.promptTokens);
     m.completionTokens = toTokenNum(v.completionTokens);
     m.genTime = v.genTime || 0;
@@ -364,9 +366,8 @@ function buildRagSourcesHtml(sources){
       scoreHtml = `<span class="rag-source-score ${cls}" title="相关度（cosine distance=${src.distance.toFixed(3)}）">相关度 ${score}%</span>`;
     }
     const preview = src.content.length > 150 ? src.content.slice(0, 150) + "…" : src.content;
-    const isSafety = src.isSafety;
-    const sourceName = isSafety ? "🛡️ 安全兜底" : `📄 ${escapeHtml(src.name)}`;
-    const openBtnHtml = (!isSafety && src.fullPath)
+    const sourceName = `📄 ${escapeHtml(src.name)}`;
+    const openBtnHtml = src.fullPath
       ? `<button class="rag-src-btn rag-open-btn" data-path="${escapeHtml(src.fullPath)}" title="打开文件所在目录">📂 打开目录</button>`
       : "";
 

@@ -29,19 +29,21 @@ const DEFAULT_CFG = {
   ragEnabled: false,
   compareConcurrent: false,
   // ★ 长期记忆配置
-  memoryEnabled: true, // 默认开启记忆
-  memoryRounds: 3,    // 检索时注入最相关的前 N 条记忆
-  memoryExtract: true, // 自动从对话提取记忆
+  memoryEnabled: true,
+  memoryRounds: 3,
+  memoryExtract: true,
   // ★ 1.23 视觉输入
-  visionEnabled: true,     // 允许拖拽/上传图片
-  imageMaxEdge: 1568,      // 图片压缩后的最长边（像素）
+  visionEnabled: true,
+  // ★ 修复 #8：默认最长边从 1568 降到 1024。
+  //   1568px 的 JPEG 通常 300~500KB，4 张就超过 1MB，几轮就会打爆 localStorage 5MB 配额。
+  //   1024px 足够让大多数视觉模型识别内容，体积小一半以上。
+  //   用户如果需要更高清，可以在「设置 → 视觉输入」里手动调回。
+  imageMaxEdge: 1024,
   // ★ 1.23 工具调用
-  toolsEnabled: false,     // 默认关闭，避免不支持 tool calling 的模型报错
-  maxToolRounds: 5,        // 最大工具调用轮次，防止死循环
-  toolAutoApprove: true,   // 只读工具自动执行，无需逐次确认
+  toolsEnabled: false,
+  maxToolRounds: 5,
+  toolAutoApprove: true,
   // ★ 修复（16）：补上预设持久化字段的默认值。
-  //   之前 1.23 一直靠 `cfg.activePresetId || ""` 的兜底在运行，
-  //   显式声明可以让"恢复备份"和"重置配置"的默认值语义更清晰。
   activePresetId: ""
 };
 
@@ -77,9 +79,8 @@ function loadLocal() {
   if (!cfg.emoMap || typeof cfg.emoMap !== "object" || Array.isArray(cfg.emoMap)) cfg.emoMap = {};
   if (!cfg.ragUrl) cfg.ragUrl = DEFAULT_CFG.ragUrl;
   if (!cfg.num_predict) cfg.num_predict = 1024;
-  // ★ 修复（16）：旧版配置没有 activePresetId，读取时补默认值
   if (cfg.activePresetId === undefined) cfg.activePresetId = "";
-  
+
   // 兼容旧版配置：如果没有 providers，则根据旧版 url 生成一个
   if (!cfg.providers || !Array.isArray(cfg.providers) || cfg.providers.length === 0) {
     cfg.providers = [
@@ -92,7 +93,7 @@ function loadLocal() {
       }
     ];
   }
-  delete cfg.url; 
+  delete cfg.url;
 }
 
 function saveLocal() {

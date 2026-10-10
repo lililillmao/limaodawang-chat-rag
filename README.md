@@ -185,18 +185,13 @@ cp config.example.json config.json
   "chunk_size": 600,
   "chunk_overlap": 100,
   "host": "127.0.0.1",
-  "port": 8000,
-  "safety_keywords": ["自杀", "自残", "想死"],
-  "safety_fallback_path": ""
+  "port": 8000
 }
 ```
 
 - `skill_dir`：你的 Skill 总目录
-- `safety_keywords`：可选，触发安全拦截的关键词
-- `safety_fallback_path`：可选，触发安全拦截时返回的兜底文本文件
 
 ### 5. 启动
-
 **方式 A：一键启动（Windows，推荐）**
 
 双击 `一键启动狸猫ai工具盒.bat`。脚本会自动：

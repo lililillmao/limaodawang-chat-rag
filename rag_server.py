@@ -40,12 +40,7 @@ DEFAULT_CONFIG = {
     "chunk_size": 600,
     "chunk_overlap": 100,
     "host": "127.0.0.1",
-    "port": 8000,
-    "safety_keywords": [
-        "自杀", "自残", "想死", "不想活了", "割腕",
-        "家暴", "打死我", "他打我", "想跳楼"
-    ],
-    "safety_fallback_path": ""
+    "port": 8000
 }
 
 BUILD_STATUS = {
@@ -86,8 +81,6 @@ EMBED_MODEL = CONF["embed_model"]
 CHUNK_SIZE = int(CONF["chunk_size"])
 CHUNK_OVERLAP = int(CONF["chunk_overlap"])
 OLLAMA_URL = CONF["ollama_url"].rstrip("/")
-SAFETY_KEYWORDS = CONF.get("safety_keywords", []) or []
-SAFETY_FALLBACK_PATH = resolve_path(CONF.get("safety_fallback_path", ""))
 
 # ================= ChromaDB =================
 CHROMA_PATH = os.path.join(SCRIPT_DIR, "chroma_db")
@@ -260,9 +253,12 @@ def read_file_content(filepath):
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 return f.read()
         elif looks_like_text(filepath):
-            # ★ 修复【14】：未知扩展名但看起来是纯文本 → 也索引，避免静默漏掉
-            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
+            # ★ 1.23.2：头 8KB 探测通过后，再全文扫一次 NUL 字节。
+            with open(filepath, 'rb') as f:
+                raw = f.read()
+            if b'\x00' in raw:
+                return None
+            return raw.decode('utf-8', errors='ignore')
         else:
             return None
     except Exception as e:
@@ -1042,24 +1038,11 @@ def get_emoji(skill_id: str = ""):
 @app.get("/api/search")
 def search(query: str, top_k: int = 3, skill_id: str = "", scope: str = "self"):
     if not query:
-        return {"results": [], "safety_flag": False}
-
-    if SAFETY_KEYWORDS and any(kw in query for kw in SAFETY_KEYWORDS):
-        safety_text = ""
-        if SAFETY_FALLBACK_PATH and os.path.exists(SAFETY_FALLBACK_PATH):
-            try:
-                with open(SAFETY_FALLBACK_PATH, "r", encoding="utf-8") as f:
-                    safety_text = f.read()
-            except Exception as e:
-                print(f"⚠️ 读取安全兜底文件失败: {e}")
-        if not safety_text:
-            safety_text = ("你刚说的这个，我有点担心。现在有人能陪着你吗？如果情况紧急，打 110 或 120。心理援助热线 12356。")
-        print(f"🚨 触发安全拦截：{query}")
-        return {"results": [{"content": safety_text, "source": "safety_override", "distance": 0.0}], "safety_flag": True}
+        return {"results": []}
 
     emb = get_embedding(query)
     if not emb:
-        return {"results": [], "safety_flag": False, "error": "向量服务不可用"}
+        return {"results": [], "error": "向量服务不可用"}
 
     where = None
     if scope == "self" and skill_id:
@@ -1089,12 +1072,12 @@ def search(query: str, top_k: int = 3, skill_id: str = "", scope: str = "self"):
                     "skill_id": meta.get('skill_id', ''),
                     "distance": dists[0][i] if (dists and i < len(dists[0])) else 0
                 })
-        return {"results": output, "safety_flag": False}
+        return {"results": output}
     except Exception as e:
         # 与 /api/memory/search 的错误风格保持一致：返回结构化的空结果 + error，
         # 而不是让前端只看到 500（前端对非 2xx 只会 console.error，用户完全无感）。
         print(f"⚠️ RAG 检索失败: {e}")
-        return {"results": [], "safety_flag": False, "error": str(e)}
+        return {"results": [], "error": str(e)}
 
 @app.post("/api/open_folder")
 def open_folder(req: OpenFolderReq):
@@ -1201,5 +1184,6 @@ if __name__ == "__main__":
         print(f"📂 知识库/记忆库现有: 0 个片段")
     if not os.path.exists(BASE_SKILL_DIR):
         print(f"⚠️ 警告：Skill 目录不存在！请修改 config.json 里的 skill_dir")
+
     print(f"👀 文件监听: {'已启用' if WATCHDOG_AVAILABLE else '未安装 watchdog（pip install watchdog）'}")
     uvicorn.run(app, host=CONF["host"], port=int(CONF["port"]))

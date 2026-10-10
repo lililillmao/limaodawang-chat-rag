@@ -47,6 +47,7 @@ let _usageLoaded = false;             // ★ 是否已从 localStorage 读过
 let _usageDirty = false;              // ★ 是否有未落盘的改动
 let _usageTimer = null;               // ★ 节流定时器
 let _usageLastSave = 0;               // ★ 上次落盘时间戳
+let _usageWriteWarned = false;        // ★ 1.23.2：落盘失败时避免反复弹提示
 
 // 面板 select 的持久化偏好（各自独立小 key，不碰 cfg）
 let _usageRangePref = "30";
@@ -208,8 +209,15 @@ function _usageWriteNow() {
     localStorage.setItem(USAGE_LOG_LS_KEY, JSON.stringify(_usageLogMem));
     _usageDirty = false;
     _usageLastSave = Date.now();
+    _usageWriteWarned = false;
   } catch (e) {
     console.warn("⚠️ 用量统计落盘失败（可能是 localStorage 满了）", e);
+    if (!_usageWriteWarned) {
+      _usageWriteWarned = true;
+      try {
+        if (typeof setStatus === "function") setStatus("⚠️ 统计落盘失败：浏览器存储已满，可在设置里清空统计或删对话", true);
+      } catch (_) {}
+    }
   }
 }
 

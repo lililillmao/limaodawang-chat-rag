@@ -168,6 +168,37 @@ async function applySkillCombo() {
 
 let _lastBuildStatus = "idle";
 let _autoBuildNotified = false;
+
+// ★ 修复 #5：Skill 内容变化后前端缓存不刷新。
+//   场景：同一个页面会话里，用户改了 SKILL.md → watchdog 重建向量库 → 但前端
+//   skillMetaCache[id] 里还是旧的 prompt，setActiveSkills 里 promptMissing = false，
+//   于是不会重新拉取。用户看起来"改了没生效"。
+//   修法：当 /api/build_status 从 running → completed 且是 watchdog 触发时，
+//   清空所有 Skill 的 prompt 与 emoji 缓存，让下次 setActiveSkills 时重新拉取。
+//   同时若当前有加载的 Skill，立即重新拉一次，让改动即时生效。
+function invalidateSkillCache() {
+  try {
+    for (const id in skillMetaCache) {
+      const meta = skillMetaCache[id];
+      if (meta) { meta.prompt = ""; meta.emoji = {}; }
+    }
+    console.log("[Skill] 已清空本地缓存，下次加载会重新拉取");
+  } catch (e) { console.warn("[Skill] 清空缓存失败", e); }
+}
+
+async function refreshActiveSkillsFromServer() {
+  if (!currentSkillIds.length) return;
+  const ids = currentSkillIds.slice();
+  try {
+    // 强制重新拉取（先清空缓存再走正常流程）
+    invalidateSkillCache();
+    await setActiveSkills(ids);
+    setStatus(`✅ Skill 内容已更新`);
+  } catch (e) {
+    console.warn("[Skill] 刷新失败", e);
+  }
+}
+
 async function pollBuildStatus() {
   try {
     const res = await fetch(`${getRagUrl()}/api/build_status`);
@@ -181,6 +212,10 @@ async function pollBuildStatus() {
         const trigger = s.trigger || "";
         if (trigger.startsWith("watchdog") || trigger === "startup") {
           setStatus(`✅ 知识库已自动更新`);
+          // ★ 修复 #5：文件变化后，同时失效前端 Skill 缓存并刷新当前加载的 Skill。
+          //   这样改了 SKILL.md 后不用刷新页面也能生效。
+          invalidateSkillCache();
+          await refreshActiveSkillsFromServer();
           setTimeout(() => { if (!generating) updateSkillStatus(); }, 6000);
         }
       } else if (s.status === "failed" && _autoBuildNotified) {
@@ -352,7 +387,7 @@ async function init() {
   on("toolsBtn", "click", () => {
     cfg.toolsEnabled = !cfg.toolsEnabled;
     saveLocal(); updateToolsBadge();
-    if (cfg.toolsEnabled) setStatus("🔧 工具调用已开启（点击可按 Shift 查看工具清单）");
+    if (cfg.toolsEnabled) setStatus("🔧 工具调用已开启（右键按钮可查看工具清单）");
     else setStatus("工具调用已关闭");
     if (typeof renderToolsInfo === "function") renderToolsInfo();
   });
