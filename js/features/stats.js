@@ -2,9 +2,12 @@
 // 独立模块：不依赖任何构建工具，直接被 <script src> 顺序加载。
 // 本文件只暴露 window.LimaoStats，不改动其它任何文件。
 
-// ---------- 存储 key（独立于 cfg / sessions，避免拖慢 saveLocal） ----------
-const USAGE_LS_KEY = "chat_usage";         // ★ 聚合数据（按天 + provider|model）
-const USAGE_LOG_LS_KEY = "chat_usage_log"; // ★ 明细日志
+// ---------- 存储 key ----------
+// ★ 1.24：键名不再硬编码，统一取自持久化模块的键名清单（js/persistence.js 的 PERSIST_KEY）。
+//   此前这里自己定义了一对同值常量，而 config.js 的 LS 里还声明了一对同名的死常量 ——
+//   「有哪些数据要存」有三份说法，其中一份是假的。
+const USAGE_LS_KEY = PERSIST_KEY.usage;         // ★ 聚合数据（按天 + provider|model）
+const USAGE_LOG_LS_KEY = PERSIST_KEY.usageLog;  // ★ 明细日志
 const USAGE_LOG_MAX = 5000;                // ★ 日志硬上限，超出从头部滚动删除
 const USAGE_SAVE_GAP = 800;                // ★ 落盘节流间隔（毫秒）
 
@@ -47,6 +50,7 @@ let _usageLoaded = false;             // ★ 是否已从 localStorage 读过
 let _usageDirty = false;              // ★ 是否有未落盘的改动
 let _usageTimer = null;               // ★ 节流定时器
 let _usageLastSave = 0;               // ★ 上次落盘时间戳
+let _usageWriteWarned = false;        // ★ 1.23.2：落盘失败时避免反复弹提示
 
 // 面板 select 的持久化偏好（各自独立小 key，不碰 cfg）
 let _usageRangePref = "30";
@@ -208,8 +212,15 @@ function _usageWriteNow() {
     localStorage.setItem(USAGE_LOG_LS_KEY, JSON.stringify(_usageLogMem));
     _usageDirty = false;
     _usageLastSave = Date.now();
+    _usageWriteWarned = false;
   } catch (e) {
     console.warn("⚠️ 用量统计落盘失败（可能是 localStorage 满了）", e);
+    if (!_usageWriteWarned) {
+      _usageWriteWarned = true;
+      try {
+        if (typeof setStatus === "function") setStatus("⚠️ 统计落盘失败：浏览器存储已满，可在设置里清空统计或删对话", true);
+      } catch (_) {}
+    }
   }
 }
 
@@ -406,17 +417,17 @@ function getUsageSummary(opts) {
 
 function usageReadPrefs() {
   try {
-    const r = localStorage.getItem("chat_stats_range");
+    const r = localStorage.getItem(PERSIST_KEY.statsRange);
     if (r) _usageRangePref = r;
-    const g = localStorage.getItem("chat_stats_group");
+    const g = localStorage.getItem(PERSIST_KEY.statsGroup);
     if (g) _usageGroupPref = g;
   } catch (e) { }
 }
 
 function usageSavePrefs() {
   try {
-    localStorage.setItem("chat_stats_range", _usageRangePref);
-    localStorage.setItem("chat_stats_group", _usageGroupPref);
+    localStorage.setItem(PERSIST_KEY.statsRange, _usageRangePref);
+    localStorage.setItem(PERSIST_KEY.statsGroup, _usageGroupPref);
   } catch (e) { }
 }
 

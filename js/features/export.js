@@ -36,7 +36,7 @@ function exportExtrasTxt(m){
 
 // ============ 导出 + 备份恢复 ============
 
-function backupAll(){const data={version:"1.23",savedAt:new Date().toISOString(),cfg:cfg,sessions:sessions,presets:presets,drafts:drafts};const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");a.download=`聊天备份_${ts}.json`;a.click();URL.revokeObjectURL(a.href);setStatus("已备份全部数据");}
+function backupAll(){const data={version:"1.24",savedAt:new Date().toISOString(),cfg:cfg,sessions:sessions,presets:presets,drafts:drafts};const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json;charset=utf-8"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");a.download=`聊天备份_${ts}.json`;a.click();URL.revokeObjectURL(a.href);setStatus("已备份全部数据");}
 
 async function restoreAll(file){
   try{
@@ -70,7 +70,14 @@ async function restoreAll(file){
     //   于是恢复后预设层静默失效（顶栏徽章也是空的，用户察觉不到）。
     if(typeof restoreActivePreset==="function"){try{restoreActivePreset()}catch(e){console.warn("⚠️ 恢复预设失败",e)}}
     else if(typeof updatePresetBadge==="function"){try{updatePresetBadge()}catch(e){}}
+    // ★ 1.24：恢复 = 重放同一套状态装配，别再手工列清单。
+    //   此前这里漏了 restoreDraft()（备份里的草稿读进了内存却从没写回输入框），
+    //   还漏了 updateParamBtnLabel / updateBreadcrumb / updateToolsBadge 三个面板刷新。
     renderSessions();renderPresets();renderMessages();renderQuickPrompts();renderTplList();renderEmoList();updateRagBadge();updateCtxInfo();
+    if(typeof restoreDraft==="function")restoreDraft();
+    if(typeof updateParamBtnLabel==="function")updateParamBtnLabel();
+    if(typeof updateBreadcrumb==="function")updateBreadcrumb();
+    if(typeof updateToolsBadge==="function")updateToolsBadge();
     setStatus("已恢复");alert("恢复成功！共 "+sessions.length+" 个对话。");
   }catch(e){alert("恢复失败："+e.message)}
 }

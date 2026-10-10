@@ -6,11 +6,33 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black.svg)
-![Version](https://img.shields.io/badge/Version-1.23.1-green.svg)
+![Version](https://img.shields.io/badge/Version-1.24-green.svg)
 
 ---
 
 ## ✨ 特性
+
+### 1.24 版本核心更新
+
+- 🗄️ **持久化模块（新增 `js/persistence.js`）** —— 「数据要活过刷新」这条不变量过去散落在 11 个文件的 84 个调用点上，两条落盘路径（浏览器 localStorage / 绑定的文件夹）覆盖范围不同却要手工配对，还有三套互相矛盾的错误策略。现在它们都由一个模块拥有，调用方只需要表达「这片数据变了」。一并修掉了四条真实的数据风险：
+  - **关闭页面时的回滚** —— 此前 `beforeunload` 只写 localStorage、从不写磁盘，而下次启动时磁盘那份会**无条件覆盖**内存。也就是说刚聊完就关掉标签页，内容可能被旧的 `conversations.json` 盖回去。现在关键动作立刻落盘，页面隐藏/关闭时再兜底补写一次。
+  - **流式生成期间磁盘始终落后** —— 流式渲染路径只有 1500ms 节流的 `saveLocal()`，磁盘那份从头到尾没被更新过。
+  - **磁盘写失败完全不可观测** —— `saveToDisk` 整个函数体裹在 `catch(e){}` 里，写失败连一行日志都没有。现在成败都进「落盘状态」，界面会如实提示（同一条错误只提示一次），并提供重试。
+  - **绑定文件夹可能毁数据** —— 此前选中一个已有数据的文件夹会**直接替换**当前会话；现在空文件夹直接搬进去，文件里已有数据则问一次（替换 / 把当前的写进去），无法读取时**拒绝写入**以免覆盖原有对话。
+- 🗄️ **单一真值源** —— 会话数据集（会话 + 预设）在同一时刻只住一个地方：绑了文件夹就住磁盘，否则住浏览器本地存储。不再是「两个地方都有、需要猜哪个更新」。未绑定文件夹的老用户首次运行会自动搬家。
+- 🗄️ **键名清单统一** —— 8 个存储键集中在一处。此前 `LS` 里声明了一对**从未被引用的死常量**，`chat_stats_range` / `chat_stats_group` 是**硬编码字符串**根本不在清单里，`stats.js` 又另立了一份同值常量 —— 「有哪些数据要存」有三份说法，其中一份是假的。
+- 🔒 **安全关键词拦截功能下线** —— 移除 `safety_keywords` / `safety_fallback_path` 及其后端兜底逻辑。这同时解决了 1.23.2 遗留的「路径配错时静默降级、用户无法察觉」问题。
+- 🔧 **恢复备份不再漏东西** —— 此前从备份恢复时漏调 `restoreDraft()`（备份里的草稿读进了内存却从没写回输入框），另外三个面板刷新也漏了。
+- 🔧 **测试套件扩展** —— 新增 `test_persistence.js`（79 项断言，**只加载这一个模块**，用内存适配器，不启动整个应用），套件从 5 个增至 6 个，断言总数 442 项。
+
+### 1.23.2 补丁
+
+- 🐛 **【P0】云平台 `/v1` 前缀缺失** —— `fetchModels` 与 `testProviderConnection` 硬编码 `baseUrl + "/models"`，用户填 `https://api.deepseek.com`（不带 `/v1`）时会打到 `/models` 得 404，**除 Ollama 外所有外部平台几乎不可用**。新增 `resolveOpenAIModelsEndpoint()` 统一推断。
+- 🐛 **Skill 内容变化后前端缓存不刷新** —— 同页面内改 `SKILL.md`，watchdog 会重建向量库，但 `skillMetaCache` 里还是旧 prompt，用户以为「改了没生效」。现在构建完成后会失效缓存并立即重新拉取。
+- 🐛 **嵌套 JSON 的工具调用识别失败** —— 单层正则只能匹配一层花括号，模型把工具调用当文本输出且参数含嵌套对象时整段匹配失败。改为括号平衡扫描。
+- 🐛 **对比模式下记忆重复写入** —— 两条流几乎同时完成，各自读到旧快照、去重都判 false，同一条记忆被写两遍。加模块级锁。
+- 🐛 **图片存储阈值过宽** —— 单张 400KB × 6 张就可能打爆 5MB 配额。收敛为单张 200KB、单轮 4 张、默认最长边 1024px。
+- 🐛 **工具按钮提示文案** —— 写的是「按 Shift 查看」，实际是右键。
 
 ### 1.23.1 稳定性补丁
 
@@ -95,9 +117,10 @@
 ┌─────────────────────────┐         ┌──────────────────────────┐
 │  js/ 模块化前端         │         │  ChromaDB (cosine 距离)   │
 │  - state/config/utils   │         │  - skill_knowledge 集合   │
-│  - storage/session      │         │  - user_memory 集合       │
-│  - markdown/api         │         │  - 按 skill_id 隔离检索   │
-│  - ui/ + features/      │         └──────────────────────────┘
+│  - persistence (落盘)   │         │  - user_memory 集合       │
+│  - storage/session      │         │  - 按 skill_id 隔离检索   │
+│  - markdown/api         │         └──────────────────────────┘
+│  - ui/ + features/      │
 │  - main.js (入口)       │
 └───────────┬─────────────┘
             │ HTTP
@@ -119,12 +142,13 @@
 
 **工作流程：**
 
-1. 浏览器加载 `index.html`，按顺序引入 `js/` 下 18 个模块
+1. 浏览器加载 `index.html`，按顺序引入 `js/` 下 19 个模块
 2. `main.js` 的 `init()` 启动 → 拉取 Skill 列表 → 恢复上次选择的 Skill / 预设 → 绑定拖拽上传
 3. 用户发消息 → 按当前 Skill 命名空间检索 → 拼接 system prompt → 发给所选平台的模型
 4. AI 流式返回 → 前端渲染（Markdown / 代码高亮 / KaTeX / 颜文字替换）
 5. 回答完毕后，后台静默从对话中提取记忆并存入 `memory.json` 和向量库
 6. 后端 watchdog 盯着 `skill_dir`，有文件变化 → 2 秒后自动增量重建
+7. 任何时候状态发生变化，都只告诉持久化模块「哪一片变了」——由它决定写去哪、什么时候写、失败了怎么办。页面隐藏 / 关闭时会兜底补写一次，保证磁盘不落后于内存。
 
 ---
 
@@ -165,8 +189,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> ⚠️ **1.22 新增依赖**：`python-multipart`（用于接收前端上传的临时文件）。如果你的 `requirements.txt` 里还没有它，请手动加上。
-
 ### 4. 配置
 
 复制示例配置并修改：
@@ -185,18 +207,13 @@ cp config.example.json config.json
   "chunk_size": 600,
   "chunk_overlap": 100,
   "host": "127.0.0.1",
-  "port": 8000,
-  "safety_keywords": ["自杀", "自残", "想死"],
-  "safety_fallback_path": ""
+  "port": 8000
 }
 ```
 
 - `skill_dir`：你的 Skill 总目录
-- `safety_keywords`：可选，触发安全拦截的关键词
-- `safety_fallback_path`：可选，触发安全拦截时返回的兜底文本文件
 
 ### 5. 启动
-
 **方式 A：一键启动（Windows，推荐）**
 
 双击 `一键启动狸猫ai工具盒.bat`。脚本会自动：
@@ -442,18 +459,21 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 
 > 💡 浏览器 localStorage 只有约 5MB。如果要导入大量历史，建议先在「⚙ 设置 → 存储目录」绑定一个文件夹——数据会写到磁盘 `conversations.json`，没有 5MB 限制。
 
----## 📂 前端目录结构
+---
+
+## 📂 前端目录结构
 
 ```
 js/
 ├── state.js              # 全局状态变量
 ├── utils.js              # 通用工具（含模板变量解析、分支树辅助、端点推断）
-├── config.js             # 默认配置、本地持久化、参数三级继承
-├── storage.js            # 草稿 + IndexedDB + 文件夹同步
+├── persistence.js        # ★ 1.24 持久化模块：键名清单、状态切片、两个存储后端、节流、落盘状态
+├── config.js             # 默认配置、参数三级继承（loadLocal/saveLocal 已改为薄壳）
+├── storage.js            # 草稿 + IndexedDB + 文件夹绑定（已改为薄壳，实现搬进 persistence.js）
 ├── session.js            # 会话增删改查、搜索、分支面包屑
 ├── markdown.js           # Markdown 渲染、思考分离、颜文字替换
 ├── api.js                # 多平台请求 + RAG 检索 + 临时文件 + 记忆接口 + 工具/多模态消息体
-├── main.js               # 应用入口 init() + Skill 组合 + 构建轮询
+├── main.js               # 应用入口 init() + Skill 组合 + 构建轮询 + 卸载落盘
 ├── ui/
 │   ├── sidebar.js        # 侧栏会话列表（含分支缩进）
 │   ├── input.js          # 输入框、快捷模板、语音、拖拽上传、图片压缩
@@ -468,8 +488,10 @@ js/
     └── importer.js       # ★ 1.23 ChatGPT / Claude 历史解析、预览勾选、配额保护导入
 ```
 
-加载顺序在 `index.html` 底部，共 18 个 `<script src="js/...">`，无打包、无构建。
-新增的 3 个模块（tools / stats / importer）插在 `api.js` 之后、`ui/sidebar.js` 之前加载。
+加载顺序在 `index.html` 底部，共 **19 个** `<script src="js/...">`，无打包、无构建。
+加载顺序本身就是依赖声明：`persistence.js` 必须排在 `config.js` 之前（`LS` 由它派生），
+`tools / stats / importer` 插在 `api.js` 之后、`ui/sidebar.js` 之前。
+`tests/static-check.ps1` 会按 `index.html` 里的真实顺序把 19 个模块拼起来整体解析，防止顺序写错。
 
 ---
 
@@ -580,7 +602,7 @@ rag_scope: self
 | 知识库管理 | 一键重建向量库（增量），带实时进度 |
 | Skill 目录 | 动态修改并热重载，同时重启文件监听 |
 | 并发对比开关 | 根据显卡性能选择双模型对比模式 |
-| 存储目录 | 绑定本地文件夹，会话自动同步到 `conversations.json` |
+| 存储目录 | 绑定本地文件夹，会话数据集改住磁盘 `conversations.json`（单一真值源，不再两份并存） |
 | 长期记忆 | 启用/禁用记忆注入，查看/添加/删除记忆 |
 | 🖼️ 视觉输入 | 启用/禁用图片输入，调整图片最长边上限（256~4096px） |
 | 🔧 工具调用 | 启用/禁用 function calling，调整最大调用轮次（1~20） |
@@ -611,7 +633,7 @@ rag_scope: self
 
 ```
 .
-├── index.html                 # 前端骨架 + 18 个 <script src>
+├── index.html                 # 前端骨架 + 19 个 <script src>
 ├── css/                       # 8 个样式表
 │   ├── base.css               # 变量、reset、主题
 │   ├── layout.css             # 侧栏、顶栏、面包屑
@@ -621,7 +643,8 @@ rag_scope: self
 │   ├── stats.css              # ★ 1.23 成本统计面板与趋势图
 │   ├── importer.css           # ★ 1.23 历史导入预览界面
 │   └── tools.css              # ★ 1.23 工具调用卡片、图片、费用徽章
-├── js/                        # 18 个前端模块（含 3 个 1.23 新增）
+├── js/                        # 19 个前端模块（含 1.24 新增的 persistence.js）
+├── GLOSSARY.md                # ★ 1.24 领域词汇表（会话 / 预设 / 状态切片 / 单一真值源 …）
 ├── rag_server.py              # 后端 RAG 服务（含 watchdog + 记忆系统）
 ├── requirements.txt
 ├── 一键启动狸猫ai工具盒.bat     # 一键启动
@@ -630,11 +653,13 @@ rag_scope: self
 ├── LICENSE
 ├── README.md
 ├── docsCHANGELOG.md           # 更新日志
-├── tests/                     # ★ 1.23.1 测试套件（241 项断言）
+├── PATCH_1.23.2.txt            # ★ 1.23.2 补丁说明（历史存档）
+├── tests/                     # ★ 测试套件（442 项断言 / 6 个套件）
 │   ├── 运行测试.bat            # 双击即可跑全部测试
-│   ├── run-all.ps1            # 测试编排（5 个套件）
-│   ├── static-check.ps1       # 静态检查（语法 / 重复声明 / Python 语法）
+│   ├── run-all.ps1            # 测试编排（6 个套件）
+│   ├── static-check.ps1       # 静态检查（语法 / 重复声明 / 合并解析 / Python 语法）
 │   ├── test_tools.js          # 工具调用模块（86 项）
+│   ├── test_persistence.js    # ★ 1.24 持久化模块（79 项，只加载这一个模块）
 │   ├── test_importer.js       # 历史导入模块（36 项）
 │   ├── test_integration.js    # 集成冒烟（125 项）
 │   └── test_backend.py        # ★ 1.23.1 后端回归（116 项，带沙箱）
@@ -656,7 +681,7 @@ rag_scope: self
 
 ## 🧪 测试
 
-1.23.1 附带一套自动化测试（**241 项断言**），改完代码后建议跑一遍，确认没有把旧功能改坏：
+1.24 附带一套自动化测试（**442 项断言 / 6 个套件**），改完代码后建议跑一遍，确认没有把旧功能改坏：
 
 ```bash
 # 方式 A：双击
@@ -668,16 +693,18 @@ powershell -ExecutionPolicy Bypass -File tests\run-all.ps1
 
 | 套件 | 覆盖内容 | 断言数 |
 |---|---|---|
-| 1/5 静态检查 | 18 个模块逐个语法检查、跨文件重复顶层声明、按加载顺序拼接后整体解析、后端 Python 语法 | — |
-| 2/5 工具调用 | 工具注册表完整性、schema 不泄漏内部字段、参数 JSON 容错（围栏/截断/噪声）、计算器安全求值（含注入尝试）、工具执行永不抛异常、**OpenAI 分片拼接**、多模态消息体 | 86 |
-| 3/5 历史导入 | 格式识别、ChatGPT 对话树回溯、成环不死循环、`current_node` 缺失兜底、隐藏消息过滤、三种时间格式、空会话跳过、标题兜底 | 36 |
-| 4/5 集成冒烟 | 按 `index.html` 真实顺序加载全部 18 个模块并跑 `init()`、**1.22 全部旧函数仍在**、1.23 新函数齐备、必需 DOM id 齐全、CSS 引用完整、新功能运行时行为、**1.22 旧 localStorage 配置升级**、旧消息渲染降级、**1.23.1 修复项回归**（`data-last` / `navTicks` 索引 / `compare` 长度 / `tempRagFiles` 清空 / 纯图片发送 / 预设启用链路 / 多轮 token 累加 / 版本栈工具与 usage 还原） | 125 |
-| 5/5 后端回归 | **`split_text` 死循环防护**、**watchdog 忽略正则跨平台**、**watchdog 事件类型过滤**、**`/api/skill_content` 返回真正的 name**、**`find_skill_root` 根目录识别**、**`parse_rag_scope` 接受引号与 BOM**、**`/api/emoji` 路由存在**、**`search_memory` 脏记录不 500**、**`top_k` 越界夹取**、**`add_memory` 毫秒 ID 不碰撞 + 原子写入**、**`run_build_task` 异常后状态复位**、**`/api/build` 并发拒绝**、**`read_file_content` 白名单补齐** | 116 |
+| 1/6 静态检查 | 19 个模块逐个语法检查、跨文件重复顶层声明、按加载顺序拼接后整体解析、后端 Python 语法 | — |
+| 2/6 工具调用 | 工具注册表完整性、schema 不泄漏内部字段、参数 JSON 容错（围栏/截断/噪声）、计算器安全求值（含注入尝试）、工具执行永不抛异常、**OpenAI 分片拼接**、多模态消息体 | 86 |
+| 3/6 持久化 | 键名清单完整性、切片性格与住所、**单一真值源**（绑/不绑文件夹两种家）、读取的四种裁决（磁盘 / 本地 / 迁移 / 读不出来）、节流合批、**配额错误同步抛出**（importer 回滚依赖）、**磁盘写失败的可见性**、**读失败后拒绝写入**、绑定文件夹的三种情况、键名没有回流到别处的静态约束 | 79 |
+| 4/6 历史导入 | 格式识别、ChatGPT 对话树回溯、成环不死循环、`current_node` 缺失兜底、隐藏消息过滤、三种时间格式、空会话跳过、标题兜底 | 36 |
+| 5/6 集成冒烟 | 按 `index.html` 真实顺序加载全部 19 个模块并跑 `init()`、**1.22 全部旧函数仍在**、1.23 / 1.24 新函数齐备、必需 DOM id 齐全、CSS 引用完整、新功能运行时行为、**1.22 旧 localStorage 配置升级**、旧消息渲染降级、**历次修复项回归**（`data-last` / `navTicks` 索引 / `compare` 长度 / `tempRagFiles` 清空 / 纯图片发送 / 预设启用链路 / 多轮 token 累加 / 版本栈工具与 usage 还原） | 125 |
+| 6/6 后端回归 | **`split_text` 死循环防护**、**watchdog 忽略正则跨平台**、**watchdog 事件类型过滤**、**`/api/skill_content` 返回真正的 name**、**`find_skill_root` 根目录识别**、**`parse_rag_scope` 接受引号与 BOM**、**`/api/emoji` 路由存在**、**`search_memory` 脏记录不 500**、**`top_k` 越界夹取**、**`add_memory` 毫秒 ID 不碰撞 + 原子写入**、**`run_build_task` 异常后状态复位**、**`/api/build` 并发拒绝**、**`read_file_content` 白名单补齐** | 116 |
 
 **测试设计要点**：
 
 - 需要 Node.js（跑前端模块）+ Python（后端回归测试）
 - **不需要启动 Ollama 或后端服务**——测试会刻意制造"向量服务不可用"的场景，验证所有降级路径
+- `test_persistence.js` **只加载 `js/persistence.js` 一个模块**，用两个内存后端替换浏览器本地存储与 File System Access，不启动整个应用、不模拟 DOM —— 这是新模块接缝是否干净的证明
 - `test_backend.py` 用**独立沙箱目录**重定向 `CONF` / `MEMORY_PATH` / `HASH_CACHE_PATH` / `CHROMA_PATH`，**绝不触碰项目里真实的 `config.json` / `memory.json` / `file_hashes.json` / `chroma_db`**——即使测试中途异常退出也不会损坏任何真实数据
 - 输出里会有大量 `⚠️ 获取向量失败 / ConnectionError`，这是**故意不启动 Ollama**产生的预期噪音，不是错误
 
@@ -870,15 +897,40 @@ powershell -ExecutionPolicy Bypass -File tests\run-all.ps1
 </details>
 
 <details>
-<summary><b>1.22 的配置和数据升级到 1.23 / 1.23.1 会丢吗？</b></summary>
+<summary><b>绑定了存储目录之后，浏览器里还存着一份对话吗？</b></summary>
 
-不会。1.23 及 1.23.1 **没有修改任何既有的数据结构**：
+不存了 —— 这是 1.24 的有意改动。会话与预设在**同一时刻只住一个地方**（单一真值源）：
+
+- **没绑文件夹** → 住在浏览器 localStorage（`chat_sessions` / `chat_presets`）
+- **绑了文件夹** → 住在那个文件夹的 `conversations.json`，localStorage 里那两份**会被清掉**
+
+以前是两份都存、启动时磁盘那份**无条件覆盖**内存。只要磁盘没跟上（而关闭标签页时恰恰从不写磁盘），刚聊的内容就会被旧文件盖回去。现在磁盘是唯一的家，分歧在结构上不可能发生。
+
+⚠️ **代价你需要知道**：如果那个文件夹读不出来了（权限被撤销、换了电脑、清了浏览器数据），对话就读不出来。程序会**明确报错**，绝不静默当成空。
+</details>
+
+<details>
+<summary><b>提示「数据保存失败」/ 绑定文件夹后提示无法读取，怎么办？</b></summary>
+
+这是 1.24 新增的落盘状态提示。以前磁盘写失败是完全无声的（`saveToDisk` 整个函数体裹在 `catch(e){}` 里），你只会发现「关掉标签页再打开，刚聊的内容没了」。
+
+- **「⚠️ 数据保存失败（sessions）：…」** —— 磁盘写失败。检查文件夹是否还有写权限、磁盘是否已满。同一条错误只提示一次，不会刷屏；可放弃的数据（草稿、用量统计）失败不会打扰你。
+- **绑定文件夹时提示「无法读取这个文件夹里已有的数据」** —— 程序会**暂停往这个文件夹写入**，以免用内存里的数据覆盖掉里面原有的对话。修好权限后重新选一次这个文件夹即可解锁。
+- 想自己查：`persistStatus()` 取一份落盘状态快照，`onPersistStatus(fn)` 订阅变化。
+</details>
+
+<details>
+<summary><b>1.22 的配置和数据升级到 1.23 / 1.23.1 / 1.24 会丢吗？</b></summary>
+
+不会。1.23 / 1.23.1 / 1.23.2 **没有修改任何既有的数据结构**：
 
 - `cfg`（`chat_cfg`）只**新增**字段（`visionEnabled`、`imageMaxEdge`、`toolsEnabled`、`maxToolRounds`、`toolAutoApprove`、`activePresetId`），读取时自动带默认值，旧配置直接可用
 - `sessions` / `messages` 的结构没变，只是**可选地**多出 `images` / `toolCalls` / `toolResults` / `promptTokens` / `completionTokens` 字段
 - 旧的 AI 消息（没有这些新字段）渲染时会自动回退到原来的估算逻辑，不会报错
 - `memory.json` / `chroma_db` / `file_hashes.json` 完全没有改动；**升级后第一次运行不会重写 `memory.json`**
-- 备份文件格式仍是 `{version, savedAt, cfg, sessions, presets, drafts}`，**双向兼容**：1.23.1 的备份能被 1.22 恢复（新字段会被忽略），1.22 的备份也能被 1.23.1 恢复
+- 备份文件格式仍是 `{version, savedAt, cfg, sessions, presets, drafts}`，**双向兼容**：新版本的备份能被旧版本恢复（新字段会被忽略），反之亦然
+
+**1.24 唯一需要留意的**：如果你此前**已经绑定过存储目录**，升级后第一次运行会把 localStorage 里的会话**搬家**进那个文件夹的 `conversations.json`（文件不存在或为空时），之后 localStorage 里那份会被清掉。这是上面那条「单一真值源」的行为，不是数据丢失。如果你**没有**绑定文件夹，则完全无感 —— 数据继续住在 localStorage 里。
 </details>
 
 <details>
@@ -930,17 +982,20 @@ powershell -ExecutionPolicy Bypass -File tests\run-all.ps1
 - [x] 导入 ChatGPT / Claude 历史（1.23）
 - [x] 成本统计（1.23）
 - [x] **1.23.1 稳定性补丁**（详见顶部"1.23.1 稳定性补丁"小节）
+- [x] **1.23.2 补丁**（云平台 `/v1` 前缀、Skill 缓存刷新、嵌套 JSON 工具调用、记忆重复写入、图片阈值）
+- [x] **1.24 持久化模块**（单一真值源、键名清单统一、卸载兜底落盘、落盘状态可见化、读失败拒绝写入）
+- [x] **1.24 安全关键词拦截功能下线**
+- [x] **1.24 测试套件扩展至 6 个套件 / 442 项断言**
 
 ### 未来计划
 
 - [ ] MCP 协议接入
 - [ ] 数据加密
 - [ ] 插件市场
-
-### 1.23 已知问题（**均已在 1.23.1 修复**）
-
-- ~~**角色预设实际未生效**：`currentPresetId` 全项目没有任何赋值点~~ → **1.23.1 已修**，新增 `setActivePreset` / `restoreActivePreset` / 顶栏徽章
-- ~~**`resetEmo` 调用了一个后端不存在的接口**~~ → **1.23.1 已修**，后端补了 `/api/emoji` 路由
+- [ ] 把余下的 `saveLocal()` / `saveToDisk()` 调用点逐个迁移到持久化模块的具名接口（目前是薄壳过渡，行为已正确）
+- [ ] 把 `usage` / `statsPrefs` 两片数据的写入也收进持久化模块（键名已登记，写入仍由 `stats.js` 自己管）
+- [ ] 修复 `cfg.emoMap` 写而不读：颜文字编辑会被持久化，但读取入口走的是 `window.currentSkillEmo`，重启后不生效
+- [ ] 后端 `rag_server.py` 仍在 **import 时**创建真实 `chroma_db` 客户端（`chroma_db/` 副作用），应改为装配时注入
 
 ---
 

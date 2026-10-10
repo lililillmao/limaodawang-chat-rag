@@ -2,12 +2,15 @@
 
 // ============ ★ 1.23：临时图片处理（多模态输入） ============
 
-// 单张图片的存储上限（dataURL 长度）。localStorage 总配额约 5MB，所以必须压得比较狠。
-const IMG_MAX_STORE_BYTES = 400 * 1024;
-const IMG_MAX_COUNT = 6;
+// ★ 修复 #8：单张图片的存储上限从 400KB 降到 200KB。
+//   原来 400KB × 6 张 = 2.4MB，加上其他 localStorage 数据，两轮就爆 5MB 配额。
+//   200KB × 4 张 = 800KB 一轮，配合"发送后清空"，可以撑住十几轮。
+//   如果用户嫌压缩太狠，可以在设置里调大 imageMaxEdge（压缩质量不变，只影响尺寸）。
+const IMG_MAX_STORE_BYTES = 200 * 1024;
+// ★ 修复 #8：单轮图片数量从 6 张降到 4 张，进一步降低一轮的内存压力。
+const IMG_MAX_COUNT = 4;
 
 // ★ 1.23.3：视觉模型能力检测
-// 用关键词匹配，覆盖常见的本地 / 云端视觉模型。宁可宽松也不漏判。
 const VISION_MODEL_RE = /vision|llava|minicpm-v|moondream|bakllava|[-_/]vl(?![a-z])|vl-|gpt-4o|gpt-4-turbo|gpt-4-vision|gpt-4\.1|gemini|claude-3|claude-sonnet-4|claude-opus|glm-4v/i;
 
 function isVisionCapable(modelName) {
@@ -15,8 +18,6 @@ function isVisionCapable(modelName) {
   return VISION_MODEL_RE.test(String(modelName));
 }
 
-// 判断当前选中的模型是否支持视觉。返回：
-//   { ok: true } 或 { ok: false, model, provider }
 function checkCurrentModelVision() {
   const providerId = cfg.modelProviderId || currentProviderId;
   const provider = (cfg.providers || []).find(p => p.id === providerId) || null;
@@ -25,7 +26,6 @@ function checkCurrentModelVision() {
   return { ok: false, model, provider };
 }
 
-// 把 File 读成 dataURL
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -50,7 +50,7 @@ async function compressImage(file) {
     i.src = rawDataUrl;
   });
 
-  const maxEdge = parseInt(cfg.imageMaxEdge, 10) || 1568;
+  const maxEdge = parseInt(cfg.imageMaxEdge, 10) || 1024;
   let { width: w, height: h } = img;
   const long = Math.max(w, h);
   if (long > maxEdge) {
@@ -62,16 +62,12 @@ async function compressImage(file) {
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d");
-  // 白色打底：PNG 透明区域转 JPEG 后会变黑，铺白更自然
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
 
-  // 从 0.85 开始逐档降质量，直到体积达标
-  // ★ 修复（10）：原来先无条件 canvas.toDataURL("image/jpeg", 0.85) 做一次，
-  //   紧接着进循环又从 0.85 重做一遍，等于每张图多了一次完整的 JPEG 编码
-  //   （大图上是肉眼可见的卡顿）。现在只在循环里编码一次，达标即跳出。
-  const qualities = [0.85, 0.75, 0.65, 0.55, 0.45];
+  // ★ 修复 #8：质量档位往下扩一档，让更多图能在 200KB 内完成压缩。
+  const qualities = [0.85, 0.75, 0.65, 0.55, 0.45, 0.35];
   let out = "";
   for (const q of qualities) {
     out = canvas.toDataURL("image/jpeg", q);
@@ -93,13 +89,11 @@ async function handleImages(files) {
   const list = Array.from(files || []).filter(f => f.type && f.type.startsWith("image/"));
   if (!list.length) return;
 
-  // ★ 1.23.3：先检查视觉功能开关
   if (cfg.visionEnabled === false) {
     setStatus("图片输入已在设置中关闭", true);
     return;
   }
 
-  // ★ 1.23.3：再检查当前模型是否支持视觉
   const visionCheck = checkCurrentModelVision();
   if (!visionCheck.ok) {
     const modelName = visionCheck.model || "(未选择模型)";
@@ -121,7 +115,6 @@ async function handleImages(files) {
     setStatus(`正在压缩图片：${file.name}…`);
     try {
       const out = await compressImage(file);
-      // 同名去重（与临时文件一致的"先删后加 = 替换"语义）
       const existingIdx = tempImages.findIndex(im => im.name === file.name);
       if (existingIdx >= 0) tempImages.splice(existingIdx, 1);
       tempImages.push({
@@ -140,7 +133,6 @@ async function handleImages(files) {
   renderTempFileChips();
 }
 
-// 图片缩略图 chip 的 HTML（与临时文件 chip 混排在同一容器里）
 function buildImageChipsHtml() {
   if (!tempImages.length) return "";
   return tempImages.map((im, i) => `
@@ -164,7 +156,6 @@ function renderTempFileChips() {
     box.innerHTML = "";
     return;
   }
-  // ★ 1.23：图片 chip 与文件 chip 混排，图片在前（视觉上更贴近输入）
   const imgHtml = typeof buildImageChipsHtml === "function" ? buildImageChipsHtml() : "";
   const fileHtml = tempRagFiles.map((f, i) => `
     <div class="temp-file-chip">
@@ -183,7 +174,6 @@ function renderTempFileChips() {
       setStatus(`已移除临时文件，剩余 ${tempRagFiles.length} 个`);
     };
   });
-  // ★ 1.23：图片删除
   box.querySelectorAll(".chip-del[data-img-idx]").forEach(btn => {
     btn.onclick = () => {
       const idx = parseInt(btn.dataset.imgIdx);
@@ -203,13 +193,11 @@ async function handleFiles(files) {
     }
     setStatus(`正在解析临时文件：${file.name}...`);
 
-    // ★ 核心修改：纯文本文件直接由前端读取，不经过后端！
     if (file.name.match(/\.(md|txt|py|json|csv|html|css|js|xml|yaml|yml)$/i)) {
       try {
         const text = await file.text();
         if (!text.trim()) { setStatus(`${file.name} 内容为空`, true); continue; }
-        
-        // 前端做简易切片
+
         const chunks = [];
         let start = 0;
         while (start < text.length) {
@@ -218,14 +206,13 @@ async function handleFiles(files) {
         }
         const existingIdx = tempRagFiles.findIndex(f => f.filename === file.name);
         if (existingIdx >= 0) tempRagFiles.splice(existingIdx, 1);
-        
+
         tempRagFiles.push({ filename: file.name, chunks });
         setStatus(`已加载临时文件：${file.name}（${chunks.length} 个片段）`);
       } catch (e) {
         setStatus(`读取 ${file.name} 失败`, true);
       }
     } else {
-      // 非文本文件（如 PDF、Word），仍走后端解析
       const data = await parseTempFile(file);
       if (data && data.chunks && data.chunks.length > 0) {
         const existingIdx = tempRagFiles.findIndex(f => f.filename === data.filename);
@@ -246,7 +233,6 @@ function bindDragAndDrop() {
   const fileInput = document.getElementById("fileInput");
   const fileUploadBtn = document.getElementById("fileUploadBtn");
 
-  // ★ 全局拖拽拦截
   window.addEventListener("dragenter", (e) => {
     e.preventDefault();
     if (e.dataTransfer.types.includes("Files")) {
@@ -267,7 +253,6 @@ function bindDragAndDrop() {
   window.addEventListener("drop", (e) => {
     e.preventDefault();
     if (overlay) overlay.classList.remove("show");
-    // ★ 1.23：图片与文档分流。图片走多模态通道，文档走临时知识库通道。
     const all = Array.from(e.dataTransfer.files || []);
     const imgs = all.filter(f => f.type && f.type.startsWith("image/"));
     const docs = all.filter(f => !(f.type && f.type.startsWith("image/")));
@@ -275,11 +260,9 @@ function bindDragAndDrop() {
     if (docs.length) handleFiles(docs);
   });
 
-  // ★ 点击回形针上传
   if (fileUploadBtn && fileInput) {
     fileUploadBtn.onclick = () => fileInput.click();
     fileInput.onchange = (e) => {
-      // ★ 1.23：同一个选择框里也可能混着图片
       const all = Array.from(e.target.files || []);
       const imgs = all.filter(f => f.type && f.type.startsWith("image/"));
       const docs = all.filter(f => !(f.type && f.type.startsWith("image/")));
@@ -289,7 +272,6 @@ function bindDragAndDrop() {
     };
   }
 
-  // ★ 1.23：粘贴图片（截图后 Ctrl+V 直接进输入框）
   const ta = document.getElementById("input");
   if (ta) {
     ta.addEventListener("paste", (e) => {
@@ -343,7 +325,6 @@ function bindKeyboardShortcuts() {
     if (e.ctrlKey && e.key.toLowerCase() === "k") { e.preventDefault(); const inp = document.getElementById("input"); inp.value = ""; autoResize(inp); saveDraft(); inp.focus(); return; }
     if (e.ctrlKey && e.key === ",") { e.preventDefault(); openSettings(); return; }
     if (e.key === "Escape") {
-      // ★ 1.23：优先关闭图片放大预览
       const iv = document.getElementById("imgViewerMask");
       if (iv && iv.classList.contains("show")) { iv.classList.remove("show"); return; }
       const tm = document.getElementById("toolsInfoMask");
@@ -376,7 +357,6 @@ function updateRagBadge() {
   if (cfg.ragEnabled) { badge.textContent = "开"; btn.classList.add("on"); } else { badge.textContent = "关"; btn.classList.remove("on"); }
 }
 
-// ★ 1.23：工具调用开关的徽章
 function updateToolsBadge() {
   const badge = document.getElementById("toolsBadge");
   const btn = document.getElementById("toolsBtn");
@@ -385,7 +365,6 @@ function updateToolsBadge() {
   else { badge.textContent = "关"; btn.classList.remove("on"); }
 }
 
-// ★ 1.23：展示已注册工具清单的说明弹窗
 function renderToolsInfo() {
   const box = document.getElementById("toolsInfoBody");
   if (!box) return;

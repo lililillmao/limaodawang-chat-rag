@@ -1,6 +1,22 @@
 // ============ 网络请求层 ============
 // 多平台适配：Ollama / OpenAI 兼容接口
 
+// ★ 修复 #1：OpenAI 兼容平台的 /models 端点解析。
+//   原实现是硬编码 `base + "/models"`，如果 baseUrl 里没带 /v1（例如
+//   `https://api.openai.com` 或 `https://api.deepseek.com`），请求会打到
+//   `https://api.deepseek.com/models` —— 404。
+//   这里与 resolveOpenAIEndpoint 保持一致的推断逻辑。
+function resolveOpenAIModelsEndpoint(baseUrl){
+  const b = String(baseUrl || "").replace(/\/+$/, "");
+  if (/\/models$/.test(b)) return b;                     // 已写全 .../models
+  if (/\/v\d+$/.test(b)) return b + "/models";           // .../v1 → .../v1/models
+  // ★ 1.23.2 说明：这个分支处理"用户填的是 .../v1/xxx 形式的子路径"的情况，
+  //   原样返回，避免再拼 /v1/models 变成 .../v1/xxx/v1/models。
+  //   通常用户不会填成这种形式，但保留兜底以防误填。
+  if (/\/v\d+\//.test(b)) return b.replace(/\/+$/, "");
+  return b + "/v1/models";                               // 默认拼 /v1/models
+}
+
 async function fetchModels() {
   const sel = document.getElementById("modelSelect");
   const sel2 = document.getElementById("modelSelect2");
@@ -16,8 +32,9 @@ async function fetchModels() {
           models = (data.models || []).map(m => ({ providerId: provider.id, providerName: provider.name, modelName: m.name }));
         }
       } else {
-        const base = provider.baseUrl.replace(/\/$/, "");
-        const r = await fetch(base + "/models", {
+        // ★ 修复 #1：用 resolveOpenAIModelsEndpoint 代替 base + "/models"
+        const url = resolveOpenAIModelsEndpoint(provider.baseUrl);
+        const r = await fetch(url, {
           headers: provider.apiKey ? { "Authorization": "Bearer " + provider.apiKey } : {}
         });
         if (r.ok) {
@@ -234,6 +251,9 @@ async function streamRequest(model, messages, onChunk, onDone, onError, signal, 
 
 // ★ 1.23：工具调用累计器
 // ★ 1.23.1：兼容 Ollama 老版本返回的对象型 arguments
+// ★ 1.23.2：加固 name 拼接，避免 "重复片段污染"
+//   （此前 frag 与 cur 无包含关系时会无条件 cur + frag，导致
+//    极端场景下拼出 "calculatorcalc" 这类坏名字，工具静默失效）
 function accumulateToolCalls(store, incoming) {
   if (!Array.isArray(incoming)) return store || [];
   const list = Array.isArray(store) ? store : [];
@@ -244,17 +264,28 @@ function accumulateToolCalls(store, incoming) {
     if (tc.id) slot.id = tc.id;
     if (tc.type) slot.type = tc.type;
     if (tc.function) {
-      // 工具名拼接（识别重复推送）
+      // ★ 1.23.2：name 拼接，按"包含关系"判断，避免重复片段污染
       if (tc.function.name) {
         const frag = tc.function.name;
         const cur = slot.function.name;
         if (!cur) {
           slot.function.name = frag;
-        } else if (frag === cur || frag.startsWith(cur)) {
-          slot.function.name = frag.length > cur.length ? frag : cur;
+        } else if (frag === cur) {
+          // 完全相同的重复推送，忽略
+        } else if (cur.startsWith(frag)) {
+          // cur 更长，保留 cur（先收到的完整名不被短片段覆盖）
+        } else if (frag.startsWith(cur)) {
+          // frag 更长，采纳 frag
+          slot.function.name = frag;
         } else if (cur.endsWith(frag)) {
-          // 重复推送同一片段：忽略
+          // 重复推送尾部片段，忽略
+        } else if (frag.includes(cur)) {
+          // frag 完整包含 cur（frag 更长），采纳 frag
+          slot.function.name = frag;
+        } else if (cur.includes(frag)) {
+          // cur 完整包含 frag（cur 更长），保留 cur
         } else {
+          // 真正的新片段，拼接
           slot.function.name = cur + frag;
         }
       }
@@ -303,7 +334,10 @@ function buildMultimodalUserMessage(text, images, providerType) {
 async function testProviderConnection(provider) {
   try {
     const baseUrl = provider.baseUrl.replace(/\/$/, "");
-    let url = provider.type === "ollama" ? baseUrl + "/api/tags" : baseUrl + "/models";
+    // ★ 修复 #1：OpenAI 兼容平台的 /models 端点同样要走 /v1 推断
+    const url = provider.type === "ollama"
+      ? baseUrl + "/api/tags"
+      : resolveOpenAIModelsEndpoint(provider.baseUrl);
     let headers = {};
     if (provider.apiKey) headers["Authorization"] = "Bearer " + provider.apiKey;
 
@@ -349,10 +383,9 @@ async function fetchRagContext(query) {
           fullPath,
           distance: (r.distance != null ? r.distance : null),
           skillId: r.skill_id || "",
-          isSafety: r.source === "safety_override",
         };
       });
-      return { context: contextText, sources, safety_flag: data.safety_flag };
+      return { context: contextText, sources };
     }
   } catch (e) {
     console.error("⚠️ RAG 检索失败:", e);
